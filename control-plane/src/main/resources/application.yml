@@ -1,0 +1,76 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: control-plane
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:copilot}
+    username: ${DB_USER:copilot}
+    password: ${DB_PASSWORD:copilot}
+    hikari:
+      # 连接池参数：本地开发用较小值；生产再按 QPS 调优
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 开发期可打开；生产建议关闭或改 slf4j
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+# 业务自定义配置（与设计书 security.* / copilot.* 对齐）
+copilot:
+  jwt:
+    # 生产必须用环境变量注入足够长的随机密钥（HS256 建议 >= 32 字节）
+    secret: ${JWT_SECRET:dev-only-change-me-to-a-long-random-secret-key}
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+  service-token:
+    secret: ${SERVICE_TOKEN_SECRET:dev-only-service-token-secret-change-me}
+    ttl: 5m
+    audience: ai-plane
+    issuer: control-plane
+  rate-limit:
+    user-per-minute: 60
+    ip-per-minute: 120
+  quota:
+    # Redis key: quota:team:{teamId}:daily_tokens，TTL 对齐「自然日」简化为 24h
+    redis-key-ttl: 24h
+  ai-plane:
+    base-url: ${AI_PLANE_BASE_URL:http://localhost:8000}
+    # 流式读超时：Mock 很快；接真 LLM 后可调到 60~120s
+    read-timeout: 120s
+    connect-timeout: 5s
+  chat:
+    # SSE 整段超时；连接期间不因 JWT 15min 过期而中断（设计 3.6.6）
+    sse-timeout: 5m
+    default-history-limit: 20
+    # 预检配额时对 user 文本的粗估：chars/4
+    estimate-chars-per-token: 4
+
+logging:
+  level:
+    root: INFO
+    com.devops.copilot: INFO
+  pattern:
+    # 结构化排障：每条日志带 traceId（由 TraceIdFilter 写入 MDC）
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [traceId=%X{traceId}] %logger{36} - %msg%n"

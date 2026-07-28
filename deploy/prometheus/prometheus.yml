@@ -1,0 +1,7 @@
+# Prometheus 抓取配置 — Week 10 填充。
+# 先占位，保证目录结构稳定，便于后续 Compose 挂载。
+
+global:
+  scrape_interval: 15s
+
+scrape_configs: []

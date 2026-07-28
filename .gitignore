@@ -1,0 +1,47 @@
+# --- 系统 / IDE ---
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# --- Java / Maven ---
+control-plane/target/
+control-plane/.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+hs_err_pid*
+
+# --- Python / uv ---
+ai-plane/.venv/
+ai-plane/.python-version
+ai-plane/__pycache__/
+ai-plane/**/__pycache__/
+ai-plane/*.egg-info/
+ai-plane/.ruff_cache/
+ai-plane/.mypy_cache/
+ai-plane/.pytest_cache/
+ai-plane/dist/
+ai-plane/build/
+*.pyc
+.uv/
+
+# --- 环境变量 / 密钥 ---
+.env
+.env.*
+!.env.example
+**/application-local.yml
+**/secrets/
+
+# --- 日志 / 运行时 ---
+*.log
+logs/
+tmp/
+.coverage
+htmlcov/
+
+# --- Docker 本地数据卷 ---
+deploy/data/

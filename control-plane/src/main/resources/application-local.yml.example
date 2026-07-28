@@ -1,0 +1,20 @@
+# Copy to application-local.yml（已 gitignore）用于本机覆盖。
+# 切勿提交真实密钥。
+
+# spring:
+#   datasource:
+#     url: jdbc:postgresql://localhost:5432/copilot
+#     username: copilot
+#     password: copilot
+#   data:
+#     redis:
+#       host: localhost
+#       port: 6379
+
+# copilot:
+#   jwt:
+#     secret: change-me-to-a-long-random-string-at-least-32chars
+#   service-token:
+#     secret: change-me-service-token-secret
+#   ai-plane:
+#     base-url: http://localhost:8000
