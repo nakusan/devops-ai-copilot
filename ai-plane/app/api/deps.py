@@ -11,7 +11,7 @@ from app.config import settings
 def verify_service_token(
     x_service_token: Annotated[str | None, Header(alias="X-Service-Token")] = None,
 ) -> None:
-    """与 Java ServiceTokenProvider 对齐：HS256 + aud + type=service。"""
+    """校验 Java → Python 的入站 Token：HS256 + aud=ai-plane + type=service。"""
     if not x_service_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

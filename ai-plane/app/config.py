@@ -13,7 +13,13 @@ class Settings(BaseSettings):
     service_name: str = "ai-plane"
     # 必须与 Java copilot.service-token.secret 一致
     service_token_secret: str = "dev-only-service-token-secret-change-me"
+    # 入站校验：Java → Python 时 Token 的 aud（本服务身份）
     service_token_audience: str = "ai-plane"
+    # 出站签发：Python → Java 时 Token 的 aud（对端身份）
+    service_token_outbound_audience: str = "control-plane"
+    # 签发时的 sub（调用方身份）
+    service_token_issuer: str = "ai-plane"
+    service_token_ttl_seconds: int = 300
 
     # --- LLM（模式 A：图外流式）---
     # mock：无 Key 时自动降级；openai：OpenAI 兼容 API
@@ -35,8 +41,36 @@ class Settings(BaseSettings):
     embedding_model_version: str = "v1"
     database_readonly_url: str | None = None
 
-    # --- Java Internal API（Analysis 节点 TODO 预留）---
-    java_internal_base_url: str = "http://control-plane:8080"
+    # --- Java Internal API（Python → Java 回调，Phase 4）---
+    java_internal_base_url: str = "http://localhost:8080"
+
+    # --- Kafka / MinIO（未配置 bootstrap 时不启动 Consumer，聊天仍可用）---
+    kafka_bootstrap: str | None = None
+    kafka_knowledge_topic: str = "knowledge.ingest.v1"
+    kafka_knowledge_dlq: str = "knowledge.ingest.dlq.v1"
+    kafka_analysis_topic: str = "analysis.ingest.v1"
+    kafka_analysis_dlq: str = "analysis.ingest.dlq.v1"
+    kafka_ingest_group: str = "ai-plane-ingest-v1"
+    kafka_analysis_group: str = "ai-plane-analysis-v1"
+    ingest_max_retries: int = 3
+
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "devops-copilot"
+    minio_secure: bool = False
+
+    # --- RAG 切块（W9）---
+    chunk_size: int = 2000  # 约 512 tokens（字符近似）
+    chunk_overlap: int = 200
+    embedding_batch_size: int = 32
+
+    # --- Analysis MVP（W8）---
+    analysis_sample_bytes: int = 1_048_576  # 前 1MB
+
+    # --- 独立 Worker（与 FastAPI 分进程）---
+    # knowledge / analysis，逗号分隔；空或未设则两者都启
+    worker_roles: str = "knowledge,analysis"
 
     def effective_llm_mode(self) -> Literal["mock", "openai"]:
         """无 API Key 时强制 mock，保证 CI/本机无密钥也能跑通。"""

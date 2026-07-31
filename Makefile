@@ -1,4 +1,4 @@
-.PHONY: help infra-up infra-down infra-ps java-compile python-sync python-lint ci-local
+.PHONY: help infra-up infra-down infra-ps java-compile python-sync python-lint python-worker ci-local
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
@@ -10,6 +10,7 @@ help:
 	@echo "  java-compile   编译 control-plane（跳过测试）"
 	@echo "  python-sync    同步 ai-plane 依赖（uv sync）"
 	@echo "  python-lint    对 ai-plane 执行 ruff check"
+	@echo "  python-worker  启动独立 Kafka Worker（需 KAFKA_BOOTSTRAP）"
 	@echo "  ci-local       本地执行与 CI 等价的检查"
 
 infra-up:
@@ -29,5 +30,8 @@ python-sync:
 
 python-lint:
 	cd ai-plane && uv run ruff check .
+
+python-worker:
+	cd ai-plane && uv run python -m app.worker
 
 ci-local: java-compile python-sync python-lint

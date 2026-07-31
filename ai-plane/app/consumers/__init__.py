@@ -1,1 +1,1 @@
-"""顶层 Kafka 消费者入口（后续周次在 lifespan 中启动）。"""
+"""顶层 Kafka 消费者入口（由独立进程 `app.worker` 启动，不挂 FastAPI lifespan）。"""

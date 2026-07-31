@@ -1,1 +1,1 @@
-"""分析 Worker 配置（Week 8）。"""
+"""Analysis Worker 配置说明（实际值集中在 app.config.Settings）。"""

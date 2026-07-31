@@ -1,4 +1,5 @@
-"""Analysis ingest 消费者 — Phase 4 / W8 实现。
+"""顶层入口：转发到 analysis consumer（由 app.worker 启动）。"""
 
-TODO(Phase-4/W8): Analysis Worker ingest — Analysis Worker + Java API 未就绪
-"""
+from app.analysis.consumer.analysis_ingest_consumer import run_analysis_ingest_consumer
+
+__all__ = ["run_analysis_ingest_consumer"]

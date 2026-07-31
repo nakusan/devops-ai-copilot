@@ -17,9 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * 保护 /internal/**：只接受 Service Token，不走用户 JWT。
- *
- * <p>Phase 1 尚无内部业务 API，但提前挂 Filter，避免后续误开裸接口。
+ * 保护 /internal/**：只接受 Service Token（入站 aud=control-plane），不走用户 JWT。
  */
 @Component
 public class ServiceTokenFilter extends OncePerRequestFilter {

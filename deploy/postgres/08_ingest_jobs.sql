@@ -7,6 +7,8 @@ CREATE TABLE ingest_jobs (
     kafka_offset    BIGINT,
     status          VARCHAR(16) NOT NULL DEFAULT 'PENDING',
     retry_count     INT NOT NULL DEFAULT 0,
+    -- Worker 回调失败原因（截断后写入，供前端 / 排障展示）
+    error_message   TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT ingest_jobs_status_chk

@@ -10,11 +10,20 @@
 #     redis:
 #       host: localhost
 #       port: 6379
+#   kafka:
+#     bootstrap-servers: localhost:9092
 
 # copilot:
 #   jwt:
 #     secret: change-me-to-a-long-random-string-at-least-32chars
 #   service-token:
 #     secret: change-me-service-token-secret
+#     audience: ai-plane
+#     inbound-audience: control-plane
 #   ai-plane:
 #     base-url: http://localhost:8000
+#   minio:
+#     endpoint: http://localhost:9000
+#     access-key: minioadmin
+#     secret-key: minioadmin
+#     bucket: devops-copilot

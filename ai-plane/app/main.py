@@ -1,4 +1,4 @@
-"""FastAPI 应用入口（Phase 0 骨架）。"""
+"""FastAPI 应用入口（仅 HTTP / 聊天编排；Kafka 消费见 app.worker）。"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -10,7 +10,8 @@ from app.api.router import api_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    # 后续周次再挂载 Kafka 消费者 / MCP / LLM 客户端。
+    # Kafka Consumer 已拆到独立进程：`python -m app.worker`
+    # 避免重活与聊天 SSE 争抢同一事件循环。
     yield
 
 

@@ -1,4 +1,5 @@
-"""Kafka 知识入库消费者 — Phase 4 / W9 实现。
+"""顶层入口：转发到 knowledge ingest consumer。"""
 
-TODO(Phase-4/W9): Kafka ingest 管道 — 入库走 Phase 4 Kafka — 实现 knowledge.ingest.v1 消费
-"""
+from app.rag.consumer.ingest_consumer import run_knowledge_ingest_consumer
+
+__all__ = ["run_knowledge_ingest_consumer"]

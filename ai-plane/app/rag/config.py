@@ -1,1 +1,4 @@
-"""RAG 管道配置：切块大小、Embedding 模型、top-k（Week 7/9）。"""
+"""RAG 模块配置说明（实际值集中在 app.config.Settings）。"""
+
+# 切块 / Embedding / Kafka topic 等均通过环境变量注入 Settings，
+# 避免与根配置双源漂移。

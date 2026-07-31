@@ -14,9 +14,12 @@ import java.time.Instant;
 import java.util.Date;
 
 /**
- * 内网 Service Token：证明调用方是 control-plane，而不是终端用户。
+ * 内网 Service Token：双向签发/校验。
  *
- * <p>W4 起 Java WebClient 会携带此 Token 调 Python；本阶段先实现签发/校验与 Filter。
+ * <ul>
+ *   <li>{@link #issue()}：Java → Python，aud={@code audience}（ai-plane）</li>
+ *   <li>{@link #verify(String)}：Python → Java，要求 aud={@code inboundAudience}（control-plane）</li>
+ * </ul>
  */
 @Component
 public class ServiceTokenProvider {
@@ -33,6 +36,7 @@ public class ServiceTokenProvider {
         this.key = Keys.hmacShaKeyFor(properties.getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
+    /** 签发给 Python（出站）。 */
     public String issue() {
         Instant now = Instant.now();
         return Jwts.builder()
@@ -45,11 +49,15 @@ public class ServiceTokenProvider {
                 .compact();
     }
 
+    /**
+     * 校验入站 Token（Python 回调 /internal）。
+     * 必须带 inboundAudience，不能用出站 audience，否则 Java 自签 Token 也能打本服务 internal API。
+     */
     public void verify(String token) {
         try {
             Claims claims = Jwts.parser()
                     .verifyWith(key)
-                    .requireAudience(properties.getAudience())
+                    .requireAudience(properties.getInboundAudience())
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();

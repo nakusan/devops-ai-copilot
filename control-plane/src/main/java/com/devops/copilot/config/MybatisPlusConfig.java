@@ -13,7 +13,8 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @MapperScan({
         "com.devops.copilot.modules.security.mapper",
-        "com.devops.copilot.modules.conversation.mapper"
+        "com.devops.copilot.modules.conversation.mapper",
+        "com.devops.copilot.modules.file.mapper"
 })
 public class MybatisPlusConfig {
 

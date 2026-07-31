@@ -4,6 +4,22 @@ server:
 spring:
   application:
     name: control-plane
+  servlet:
+    multipart:
+      # 分析文件上限 100MB；知识库 20MB 由业务层再校验
+      max-file-size: 100MB
+      max-request-size: 105MB
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        # 跨语言消费：不写 Java 类型头，Python 只解析 JSON body
+        spring.json.add.type.headers: false
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:copilot}
     username: ${DB_USER:copilot}
@@ -47,7 +63,10 @@ copilot:
   service-token:
     secret: ${SERVICE_TOKEN_SECRET:dev-only-service-token-secret-change-me}
     ttl: 5m
+    # 出站：Java → Python
     audience: ai-plane
+    # 入站：Python → Java（与出站 aud 分离，防止 Token 跨向复用）
+    inbound-audience: control-plane
     issuer: control-plane
   rate-limit:
     user-per-minute: 60
@@ -66,6 +85,31 @@ copilot:
     default-history-limit: 20
     # 预检配额时对 user 文本的粗估：chars/4
     estimate-chars-per-token: 4
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${MINIO_BUCKET:devops-copilot}
+  kafka:
+    topics:
+      knowledge-ingest: knowledge.ingest.v1
+      analysis-ingest: analysis.ingest.v1
+      knowledge-dlq: knowledge.ingest.dlq.v1
+      analysis-dlq: analysis.ingest.dlq.v1
+  file:
+    knowledge:
+      max-bytes: 20971520
+      allowed-extensions:
+        - pdf
+        - md
+        - txt
+    analysis:
+      max-bytes: 104857600
+      allowed-extensions:
+        - log
+        - txt
+        - hprof
+    upload-rate-limit-per-hour: 10
 
 logging:
   level:

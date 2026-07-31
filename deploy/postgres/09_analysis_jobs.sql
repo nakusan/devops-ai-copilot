@@ -9,6 +9,9 @@ CREATE TABLE analysis_jobs (
     status              VARCHAR(16) NOT NULL DEFAULT 'PENDING',
     result_summary      TEXT,
     result_object_key   VARCHAR(512),
+    -- Worker 回调失败原因与重试计数（与 ingest_jobs 语义对齐）
+    error_message       TEXT,
+    retry_count         INT NOT NULL DEFAULT 0,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT analysis_jobs_file_type_chk
