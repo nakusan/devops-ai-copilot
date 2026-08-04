@@ -48,10 +48,17 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,metrics
   endpoint:
     health:
       show-details: when_authorized
+  metrics:
+    tags:
+      application: control-plane
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        chat.stream.duration: true
 
 # 业务自定义配置（与设计书 security.* / copilot.* 对齐）
 copilot:
@@ -115,6 +122,5 @@ logging:
   level:
     root: INFO
     com.devops.copilot: INFO
-  pattern:
-    # 结构化排障：每条日志带 traceId（由 TraceIdFilter 写入 MDC）
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [traceId=%X{traceId}] %logger{36} - %msg%n"
+  # 默认 pattern 由 logback-spring.xml 提供（含 traceId/spanId）。
+  # 启用 JSON：SPRING_PROFILES_ACTIVE=json

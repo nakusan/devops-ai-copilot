@@ -1,7 +1,22 @@
-# Prometheus 抓取配置 — Week 10 填充。
-# 先占位，保证目录结构稳定，便于后续 Compose 挂载。
+# Prometheus 抓取配置（Phase 5 / W10）
+# 应用在 W12 前仍本机运行，故用 host.docker.internal。
+# W12 应用入 Compose 后可改为 control-plane:8080 / ai-plane:8000。
 
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
-scrape_configs: []
+scrape_configs:
+  - job_name: control-plane
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          application: control-plane
+
+  - job_name: ai-plane
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+        labels:
+          application: ai-plane

@@ -33,6 +33,14 @@ def build_messages(state: DiagnosisState) -> list[dict[str, str]]:
 
     for tool in state.get("tool_results") or []:
         tool_name = tool.get("tool", "unknown")
+        # MCP 失败降级：明确告知模型「无法获取实时数据」，避免编造指标
+        if tool.get("success") is False or tool.get("error"):
+            err = tool.get("error") or (tool.get("result") or {}).get("error") or "unknown"
+            context_blocks.append(
+                f"【实时数据】{tool_name}: 调用失败（{err}）。"
+                "请如实告知用户暂时无法获取实时监控数据，不要编造数值。"
+            )
+            continue
         result_json = json.dumps(tool.get("result", {}), ensure_ascii=False)
         context_blocks.append(f"【实时数据】{tool_name}: {result_json}")
 

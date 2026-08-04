@@ -4,7 +4,7 @@ COMPOSE := docker compose -f deploy/docker-compose.yml
 
 help:
 	@echo "可用目标："
-	@echo "  infra-up       启动中间件（postgres/redis/kafka/minio）"
+	@echo "  infra-up       启动中间件（postgres/redis/kafka/minio/prometheus/grafana）"
 	@echo "  infra-down     停止中间件"
 	@echo "  infra-ps       查看中间件容器状态"
 	@echo "  java-compile   编译 control-plane（跳过测试）"
@@ -26,7 +26,7 @@ java-compile:
 	cd control-plane && mvn -q -DskipTests compile
 
 python-sync:
-	cd ai-plane && uv sync
+	cd ai-plane && uv sync --extra dev
 
 python-lint:
 	cd ai-plane && uv run ruff check .

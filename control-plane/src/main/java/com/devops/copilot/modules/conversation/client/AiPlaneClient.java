@@ -49,14 +49,18 @@ public class AiPlaneClient {
     public Flux<StreamEvent> streamChat(InternalChatRequest request) {
         String token = serviceTokenProvider.issue();
         String traceId = request.getTraceId() != null ? request.getTraceId() : TraceIds.current();
+        // 出站 parent spanId：优先用当前请求 MDC；缺失时现生成，避免写死常量导致排障无法区分
+        String spanId = TraceIds.currentSpanId();
+        if (spanId == null || spanId.isBlank() || spanId.length() != 16) {
+            spanId = TraceIds.newSpanId();
+        }
 
         return aiPlaneWebClient.post()
                 .uri("/internal/v1/chat/stream")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(NDJSON)
                 .header(ServiceTokenProvider.HEADER, token)
-                // 简化 traceparent：version-traceId-spanId-flags；完整 OTel 注入留 Week 10
-                .header(TraceIds.HEADER_TRACEPARENT, "00-" + padTraceId(traceId) + "-" + "00f067aa0ba902b7" + "-01")
+                .header(TraceIds.HEADER_TRACEPARENT, "00-" + padTraceId(traceId) + "-" + spanId + "-01")
                 .header(TraceIds.HEADER_X_TRACE_ID, traceId)
                 .bodyValue(request)
                 .retrieve()

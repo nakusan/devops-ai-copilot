@@ -6,7 +6,9 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import ServiceTokenDep
+from app.config import settings
 from app.graph.models.internal_chat_request import CancelRequest, InternalChatRequest
+from app.graph.orchestrator import run_diagnosis_stream
 from app.graph.streaming.cancel_registry import cancel_registry
 from app.graph.streaming.mock_streamer import mock_stream
 
@@ -21,13 +23,19 @@ async def chat_stream(
     """返回 application/x-ndjson：每行一个 StreamEvent JSON。
 
     为何不用 SSE 对内：Java WebClient 按行解析 NDJSON 更简单，且与对外 SSE 职责分离（P8）。
+
+    CHAT_BACKEND=orchestrator（默认）走 LangGraph；=mock 回退 Phase 2 Mock（排障用）。
     """
 
     cancel_event = cancel_registry.register(req.session_id)
 
     async def event_generator() -> AsyncIterator[str]:
         try:
-            async for event in mock_stream(req, cancel_event):
+            if settings.chat_backend == "mock":
+                stream = mock_stream(req, cancel_event)
+            else:
+                stream = run_diagnosis_stream(req, cancel_event)
+            async for event in stream:
                 # exclude_none：避免无用字段污染协议
                 yield event.model_dump_json(exclude_none=True) + "\n"
         finally:

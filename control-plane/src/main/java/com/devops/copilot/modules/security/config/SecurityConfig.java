@@ -64,7 +64,10 @@ public class SecurityConfig {
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh",
                                 "/actuator/health",
-                                "/actuator/info")
+                                "/actuator/info",
+                                // MVP：Prometheus 抓取内网免鉴权；生产应收口到内网 + auth（6.7 §5）
+                                "/actuator/prometheus",
+                                "/actuator/metrics")
                         .permitAll()
                         // internal 由 ServiceTokenFilter 校验，此处仍要求 authenticated
                         // 但 Service Token 不会设置 Authentication —— 改为 permitAll + Filter 把关

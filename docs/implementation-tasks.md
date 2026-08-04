@@ -3,7 +3,7 @@
 > 状态约定：`[ ]` 未做 · `[~]` 进行中 · `[x]` 完成  
 > 设计资料见同目录其他文档；**本文件仅跟踪实施进度，不替代设计书**。
 
-最后更新：2026-07-30
+最后更新：2026-08-04
 
 ---
 
@@ -58,7 +58,7 @@
 
 | 代码位置 | 占位内容 | 原因 | 补全阶段 |
 |----------|----------|------|----------|
-| `graph/nodes/tool.py` | Mock Prometheus 固定指标 | MCP Client/Server 未实现 | Phase 5 / W11 |
+| ~~`graph/nodes/tool.py`~~ | ~~Mock Prometheus 固定指标~~ | **已完成**：MCP Client + Mock Server（W11） | **Phase 5 / W11 ✓** |
 | `graph/checkpoint/redis_saver.py` | 未启用 checkpointer | MVP 对话历史走 PG history（P7） | V2 |
 | `rag/client/embedding_client.py` | hash 假向量 fallback | 无 Embedding Key 时 dev/CI 可跑 | 配置 Key 后自动切真 API |
 | `graph/llm/llm_client.py` | 模式 A 图外流式 | 模式 B `astream_events` 为 V1 优化 | V1 |
@@ -103,8 +103,14 @@
 
 ## Phase 5 — Weeks 10–11 可观测与 MCP
 
-- [ ] W10 OTel + Grafana
-- [ ] W11 MCP ToolNode + Mock Server
+- [x] W10 OTel + Grafana
+  - Java：Micrometer Prometheus、`ChatMetrics`/`IngestMetrics`、Actuator 暴露、动态 spanId、`logback-spring.xml`（profile=json）
+  - Python：`observability/`（otel/metrics/logging/middleware）、`GET /metrics`、关键路径埋点
+  - Deploy：Compose Prometheus/Grafana；scrape `host.docker.internal`；Overview Dashboard；Postmortem / 慢请求演练文档
+- [x] W11 MCP ToolNode + Mock Server
+  - `mcp` SDK + stdio Mock（prometheus / postgres-readonly）
+  - `McpClient` 白名单 / 超时降级；`tool_node` 接真实协议
+  - HTTP：`CHAT_BACKEND=orchestrator`（默认）切到 `run_diagnosis_stream`；可回退 `mock`
 
 ---
 
@@ -119,4 +125,3 @@
 - LangGraph / 真 LLM / RAG / MCP
 - Refresh Token Rotation
 - Compose 内挂载双栈应用
-

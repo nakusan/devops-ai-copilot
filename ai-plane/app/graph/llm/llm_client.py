@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -9,8 +10,11 @@ from openai import AsyncOpenAI, RateLimitError
 
 from app.config import settings
 from app.graph.models.stream_event import StreamEvent, error_event, token_event
+from app.observability.metrics import LLM_TTFB
+from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
+_tracer = get_tracer("ai-plane.llm")
 
 
 class LlmStreamResult:
@@ -59,16 +63,22 @@ async def _mock_stream(
     body = user_message or _last_user_content(messages)
     full = prefix + body
     produced = 0
+    ttfb_started = time.perf_counter()
+    first_token = True
 
-    for i in range(0, len(full), chunk_size):
-        if cancel_event.is_set():
-            yield error_event("CANCELLED", "生成已取消")
-            return
-        piece = full[i : i + chunk_size]
-        produced += len(piece)
-        yield token_event(piece)
-        if delay > 0:
-            await asyncio.sleep(delay)
+    with _tracer.start_as_current_span("llm.completion"):
+        for i in range(0, len(full), chunk_size):
+            if cancel_event.is_set():
+                yield error_event("CANCELLED", "生成已取消")
+                return
+            piece = full[i : i + chunk_size]
+            produced += len(piece)
+            if first_token:
+                LLM_TTFB.observe(time.perf_counter() - ttfb_started)
+                first_token = False
+            yield token_event(piece)
+            if delay > 0:
+                await asyncio.sleep(delay)
 
     if cancel_event.is_set():
         yield error_event("CANCELLED", "生成已取消")
@@ -110,29 +120,35 @@ async def _openai_stream(
         while attempts < 2:
             attempts += 1
             try:
-                stream = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,  # type: ignore[arg-type]
-                    temperature=temperature,
-                    stream=True,
-                    stream_options={"include_usage": True},
-                )
-                usage: dict[str, Any] = {}
-                async for chunk in stream:
-                    if cancel_event.is_set():
-                        yield error_event("CANCELLED", "生成已取消")
-                        return
-                    if chunk.usage is not None:
-                        usage = {
-                            "promptTokens": chunk.usage.prompt_tokens or 0,
-                            "completionTokens": chunk.usage.completion_tokens or 0,
-                            "totalTokens": chunk.usage.total_tokens or 0,
-                        }
-                    delta = chunk.choices[0].delta.content if chunk.choices else None
-                    if delta:
-                        yield token_event(delta)
-                _attach_usage(usage)
-                return
+                ttfb_started = time.perf_counter()
+                first_token = True
+                with _tracer.start_as_current_span("llm.completion"):
+                    stream = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,  # type: ignore[arg-type]
+                        temperature=temperature,
+                        stream=True,
+                        stream_options={"include_usage": True},
+                    )
+                    usage: dict[str, Any] = {}
+                    async for chunk in stream:
+                        if cancel_event.is_set():
+                            yield error_event("CANCELLED", "生成已取消")
+                            return
+                        if chunk.usage is not None:
+                            usage = {
+                                "promptTokens": chunk.usage.prompt_tokens or 0,
+                                "completionTokens": chunk.usage.completion_tokens or 0,
+                                "totalTokens": chunk.usage.total_tokens or 0,
+                            }
+                        delta = chunk.choices[0].delta.content if chunk.choices else None
+                        if delta:
+                            if first_token:
+                                LLM_TTFB.observe(time.perf_counter() - ttfb_started)
+                                first_token = False
+                            yield token_event(delta)
+                    _attach_usage(usage)
+                    return
             except RateLimitError:
                 if attempts >= 2:
                     yield error_event("LLM_RATE_LIMIT", "LLM 限流，请稍后重试")

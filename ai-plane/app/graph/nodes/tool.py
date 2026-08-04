@@ -1,59 +1,55 @@
-"""ToolNode — MVP Mock 固定指标（Phase 5 替换为真实 MCP）。"""
+"""ToolNode — 经 MCP Client 调用 Mock/真实 Tool（设计 6.5 / 6.6）。"""
 
+from __future__ import annotations
+
+import logging
 from typing import Any
 
 from app.graph.state import DiagnosisState
+from app.mcp.client import mcp_client
+from app.mcp.resolver import resolve_tool_calls
+
+logger = logging.getLogger(__name__)
 
 
 async def tool_node(state: DiagnosisState) -> dict[str, Any]:
-    """根据用户问题关键词返回 Mock 实时数据。
+    """enable_mcp → 关键词解析 → McpClient.call_tool → tool_results / tool_calls。
 
-    TODO(Phase-5/W11): 真实 MCP ToolNode — MCP Client/Server 未实现 — 接 McpClient.call_tool()
+    失败不抛崩图：写入带 error 的结果，由 Synthesize/LLM 降级说明。
     """
     cfg = state.get("agent_config") or {}
     if not cfg.get("enable_mcp", True):
         return {"tool_results": [], "tool_calls": []}
 
-    msg = state["user_message"]
+    calls = resolve_tool_calls(state["user_message"], cfg)
     results: list[dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = []
+    trace_id = state.get("trace_id")
 
-    # MVP：关键词 → 固定 Prometheus Mock 查询
-    if "连接数" in msg or "DB" in msg.upper():
-        mock_value = {"db_connections": 85, "unit": "count", "status": "normal"}
-        results.append(
-            {
-                "tool": "prometheus_query",
-                "arguments": {"query": "db_connections"},
-                "result": mock_value,
-            }
+    for call in calls:
+        res = await mcp_client.call_tool(
+            server=call.server,
+            name=call.tool,
+            arguments=call.arguments,
+            trace_id=trace_id,
         )
-    elif "CPU" in msg.upper():
-        results.append(
+        state_dict = res.to_state_dict()
+        results.append(state_dict)
+        tool_calls.append(
             {
-                "tool": "prometheus_query",
-                "arguments": {"query": "cpu_usage_percent"},
-                "result": {"cpu_usage_percent": 42.5, "status": "normal"},
-            }
-        )
-    elif "QPS" in msg.upper():
-        results.append(
-            {
-                "tool": "prometheus_query",
-                "arguments": {"query": "http_qps"},
-                "result": {"http_qps": 1250, "status": "normal"},
-            }
-        )
-    else:
-        # 通用 Mock：避免 tool 路径完全空结果
-        results.append(
-            {
-                "tool": "prometheus_query",
-                "arguments": {"query": "generic_metric"},
-                "result": {"value": "mock_ok", "note": "MVP Mock 数据"},
+                "tool": res.tool,
+                "server": res.server,
+                "arguments": res.arguments,
+                "result": state_dict.get("result"),
+                "success": res.success,
+                "error": res.error,
             }
         )
 
-    tool_calls = [
-        {"tool": r["tool"], "arguments": r.get("arguments"), "result": r["result"]} for r in results
-    ]
+    logger.info(
+        "tool_node done trace_id=%s calls=%d",
+        trace_id,
+        len(results),
+        extra={"trace_id": trace_id or "", "event": "mcp.tool_node.done"},
+    )
     return {"tool_results": results, "tool_calls": tool_calls}

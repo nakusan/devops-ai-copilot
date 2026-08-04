@@ -76,6 +76,10 @@ async def test_orchestrator_tool_path_has_tool_calls() -> None:
     done = events[-1]["done"]
     assert done["intent"] == "tool"
     assert len(done["toolCalls"]) >= 1
+    # W11：经 MCP Mock，结果应含 85
+    payload = done["toolCalls"][0]
+    result = payload.get("result") or {}
+    assert result.get("db_connections") == 85 or result.get("value") == 85
 
 
 @pytest.mark.asyncio

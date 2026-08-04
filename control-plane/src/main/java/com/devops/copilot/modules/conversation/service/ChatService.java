@@ -15,6 +15,7 @@ import com.devops.copilot.modules.conversation.domain.enums.MessageRole;
 import com.devops.copilot.modules.conversation.mapper.MessageMapper;
 import com.devops.copilot.modules.conversation.sse.SseStreamBridge;
 import com.devops.copilot.modules.security.domain.UserPrincipal;
+import com.devops.copilot.observability.metrics.ChatMetrics;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -52,6 +54,7 @@ public class ChatService {
     private final SseStreamBridge sseBridge;
     private final ChatProperties chatProperties;
     private final ObjectMapper objectMapper;
+    private final ChatMetrics chatMetrics;
 
     public ChatService(
             SessionService sessionService,
@@ -62,7 +65,8 @@ public class ChatService {
             AiPlaneClient aiPlaneClient,
             SseStreamBridge sseBridge,
             ChatProperties chatProperties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ChatMetrics chatMetrics) {
         this.sessionService = sessionService;
         this.agentService = agentService;
         this.messageService = messageService;
@@ -72,6 +76,7 @@ public class ChatService {
         this.sseBridge = sseBridge;
         this.chatProperties = chatProperties;
         this.objectMapper = objectMapper;
+        this.chatMetrics = chatMetrics;
     }
 
     public void streamChat(
@@ -117,20 +122,28 @@ public class ChatService {
         StringBuilder buffer = new StringBuilder();
         AtomicReference<JsonNode> doneRef = new AtomicReference<>();
         AtomicBoolean finished = new AtomicBoolean(false);
+        long startedAt = System.currentTimeMillis();
+        AtomicLong startedAtRef = new AtomicLong(startedAt);
+        chatMetrics.recordStart();
+        log.info(
+                "event=chat.stream.start sessionId={} traceId={}",
+                sessionId,
+                TraceIds.current());
 
         // 在弹性线程订阅，避免阻塞 Tomcat 请求线程过久（SseEmitter 已返回）
         Disposable subscription = aiPlaneClient.streamChat(internal)
                 .publishOn(Schedulers.boundedElastic())
                 .subscribe(
-                        evt -> onEvent(emitter, buffer, doneRef, finished, evt),
-                        err -> onError(emitter, sessionId, finished, err),
+                        evt -> onEvent(emitter, buffer, doneRef, finished, startedAtRef, evt),
+                        err -> onError(emitter, sessionId, finished, startedAtRef, err),
                         () -> onComplete(
                                 emitter,
                                 sessionId,
                                 principal.getTeamId(),
                                 buffer,
                                 doneRef,
-                                finished));
+                                finished,
+                                startedAtRef));
 
         emitter.onCompletion(() -> cleanup(subscription, sessionId, finished));
         emitter.onTimeout(() -> {
@@ -145,6 +158,7 @@ public class ChatService {
             StringBuilder buffer,
             AtomicReference<JsonNode> doneRef,
             AtomicBoolean finished,
+            AtomicLong startedAtRef,
             StreamEvent evt) {
         try {
             switch (evt.getType()) {
@@ -166,6 +180,13 @@ public class ChatService {
                     String message = evt.getError() != null && evt.getError().has("message")
                             ? evt.getError().get("message").asText()
                             : "上游生成失败";
+                    long durationMs = System.currentTimeMillis() - startedAtRef.get();
+                    chatMetrics.recordError(code, durationMs);
+                    log.warn(
+                            "event=chat.stream.end status=error code={} durationMs={} traceId={}",
+                            code,
+                            durationMs,
+                            TraceIds.current());
                     sseBridge.sendError(emitter, code, message);
                 }
                 default -> log.debug("忽略未知流事件 type={}", evt.getType());
@@ -182,10 +203,12 @@ public class ChatService {
             Long teamId,
             StringBuilder buffer,
             AtomicReference<JsonNode> doneRef,
-            AtomicBoolean finished) {
+            AtomicBoolean finished,
+            AtomicLong startedAtRef) {
         if (!finished.compareAndSet(false, true)) {
             return;
         }
+        long durationMs = System.currentTimeMillis() - startedAtRef.get();
         try {
             Map<String, Object> metadata = new HashMap<>();
             JsonNode done = doneRef.get();
@@ -201,6 +224,13 @@ public class ChatService {
             if (usageTotal > 0) {
                 quotaService.increaseUsage(teamId, usageTotal);
             }
+            chatMetrics.recordSuccess(durationMs);
+            log.info(
+                    "event=chat.stream.end status=success sessionId={} durationMs={} tokenCount={} traceId={}",
+                    sessionId,
+                    durationMs,
+                    usageTotal,
+                    TraceIds.current());
             sseBridge.send(emitter, "done", Map.of(
                     "messageId", assistant.getId().toString(),
                     "usage", metadata.getOrDefault("usage", Map.of())));
@@ -208,19 +238,24 @@ public class ChatService {
         } catch (SseStreamBridge.SseBrokenException broken) {
             log.debug("完成阶段客户端已断开");
         } catch (Exception ex) {
+            chatMetrics.recordError(ErrorCode.INTERNAL_ERROR.getCode(), durationMs);
             log.error("流结束落库失败", ex);
             sseBridge.sendError(emitter, ErrorCode.INTERNAL_ERROR.getCode(), "保存回复失败");
         }
     }
 
-    private void onError(SseEmitter emitter, UUID sessionId, AtomicBoolean finished, Throwable err) {
+    private void onError(
+            SseEmitter emitter, UUID sessionId, AtomicBoolean finished, AtomicLong startedAtRef, Throwable err) {
         if (!finished.compareAndSet(false, true)) {
             return;
         }
+        long durationMs = System.currentTimeMillis() - startedAtRef.get();
         log.warn("聊天流失败 sessionId={}: {}", sessionId, err.toString());
         if (err instanceof BizException biz) {
+            chatMetrics.recordError(biz.getErrorCode().getCode(), durationMs);
             sseBridge.sendError(emitter, biz.getErrorCode().getCode(), biz.getMessage());
         } else {
+            chatMetrics.recordError(ErrorCode.INTERNAL_ERROR.getCode(), durationMs);
             sseBridge.sendError(emitter, ErrorCode.INTERNAL_ERROR.getCode(), "上游流式调用失败");
         }
     }

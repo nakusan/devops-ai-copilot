@@ -72,6 +72,18 @@ class Settings(BaseSettings):
     # knowledge / analysis，逗号分隔；空或未设则两者都启
     worker_roles: str = "knowledge,analysis"
 
+    # --- Observability（W10）---
+    otel_service_name: str = "ai-plane"
+    # 空则不导出 OTLP，仅进程内 Tracer（日志关联）
+    otel_exporter_otlp_endpoint: str | None = None
+
+    # --- Chat HTTP 后端（W11：默认走 LangGraph orchestrator；可回退 mock）---
+    chat_backend: Literal["orchestrator", "mock"] = "orchestrator"
+
+    # --- MCP（W11）---
+    mcp_enabled: bool = True
+    mcp_default_timeout_seconds: float = 5.0
+
     def effective_llm_mode(self) -> Literal["mock", "openai"]:
         """无 API Key 时强制 mock，保证 CI/本机无密钥也能跑通。"""
         if self.llm_mode == "openai" and self.llm_api_key:

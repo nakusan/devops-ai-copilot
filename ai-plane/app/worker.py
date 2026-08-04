@@ -22,10 +22,12 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from app.config import settings
+from app.observability import configure_logging, setup_otel
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+configure_logging(service_name=f"{settings.otel_service_name}-worker")
+setup_otel(
+    service_name=f"{settings.otel_service_name}-worker",
+    otlp_endpoint=settings.otel_exporter_otlp_endpoint,
 )
 logger = logging.getLogger("app.worker")
 

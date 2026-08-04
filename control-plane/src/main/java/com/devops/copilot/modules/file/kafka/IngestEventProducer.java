@@ -3,6 +3,7 @@ package com.devops.copilot.modules.file.kafka;
 import com.devops.copilot.modules.file.config.KafkaTopicProperties;
 import com.devops.copilot.modules.file.kafka.event.AnalysisIngestEvent;
 import com.devops.copilot.modules.file.kafka.event.KnowledgeIngestEvent;
+import com.devops.copilot.observability.metrics.IngestMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -25,11 +26,15 @@ public class IngestEventProducer {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final KafkaTopicProperties topicProperties;
+    private final IngestMetrics ingestMetrics;
 
     public IngestEventProducer(
-            KafkaTemplate<String, Object> kafkaTemplate, KafkaTopicProperties topicProperties) {
+            KafkaTemplate<String, Object> kafkaTemplate,
+            KafkaTopicProperties topicProperties,
+            IngestMetrics ingestMetrics) {
         this.kafkaTemplate = kafkaTemplate;
         this.topicProperties = topicProperties;
+        this.ingestMetrics = ingestMetrics;
     }
 
     public long publishKnowledgeIngest(KnowledgeIngestEvent event) {
@@ -56,9 +61,11 @@ public class IngestEventProducer {
             CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(topic, key, event);
             SendResult<String, Object> result = future.get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             long offset = result.getRecordMetadata().offset();
+            ingestMetrics.recordPublishSuccess(topic);
             log.info("kafka published topic={} key={} offset={}", topic, key, offset);
             return offset;
         } catch (Exception ex) {
+            ingestMetrics.recordPublishFailure(topic);
             log.error("kafka publish failed topic={} key={}", topic, key, ex);
             throw new IllegalStateException("KAFKA_PUBLISH_FAILED: " + ex.getMessage(), ex);
         }

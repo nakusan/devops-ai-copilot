@@ -11,8 +11,11 @@ from app.graph.models.internal_chat_request import InternalChatRequest
 from app.graph.models.stream_event import StreamEvent, done_event, error_event
 from app.graph.state import DiagnosisState, init_state_from_request
 from app.graph.streaming.event_emitter import build_done_payload, citation_event
+from app.observability.metrics import CHAT_STREAM_DURATION
+from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
+_tracer = get_tracer("ai-plane.orchestrator")
 
 
 async def run_diagnosis_stream(
@@ -23,67 +26,82 @@ async def run_diagnosis_stream(
     started = time.perf_counter()
     state: DiagnosisState = init_state_from_request(req)
 
-    try:
-        graph = get_diagnosis_graph()
-        state = await graph.ainvoke(state)  # type: ignore[assignment]
+    with _tracer.start_as_current_span("internal.chat") as span:
+        span.set_attribute("session.id", req.session_id)
+        if req.trace_id:
+            span.set_attribute("copilot.trace_id", req.trace_id)
+        try:
+            graph = get_diagnosis_graph()
+            state = await graph.ainvoke(state)  # type: ignore[assignment]
 
-        intent = state.get("intent") or "direct"
-        logger.info(
-            "diagnosis graph done trace_id=%s session_id=%s intent=%s",
-            req.trace_id,
-            req.session_id,
-            intent,
-        )
-
-        citations = state.get("citations") or []
-        if citations:
-            yield citation_event(citations)
-
-        if cancel_event.is_set():
-            yield error_event("CANCELLED", "生成已取消")
-            return
-
-        cfg = req.agent_config
-        messages = state.get("llm_messages") or []
-        had_error = False
-
-        async for evt in stream_chat(
-            messages,
-            model=cfg.model,
-            temperature=cfg.temperature,
-            cancel_event=cancel_event,
-            timeout_seconds=cfg.llm_timeout_seconds,
-            user_message=req.user_message,
-        ):
-            if evt.type == "error":
-                had_error = True
-            yield evt
-
-        if had_error or cancel_event.is_set():
-            return
-
-        usage = pop_stream_usage()
-        if not usage:
-            usage = {"promptTokens": 0, "completionTokens": 0, "totalTokens": 0}
-
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        tool_calls = state.get("tool_calls") or []
-        yield done_event(
-            build_done_payload(
-                intent=intent,
-                model=cfg.model,
-                latency_ms=latency_ms,
-                usage=usage,
-                citations=citations,
-                tool_calls=tool_calls,
+            intent = state.get("intent") or "direct"
+            span.set_attribute("intent", intent)
+            logger.info(
+                "diagnosis graph done trace_id=%s session_id=%s intent=%s",
+                req.trace_id,
+                req.session_id,
+                intent,
+                extra={"trace_id": req.trace_id or "", "event": "chat.stream.graph_done"},
             )
-        )
-    except asyncio.CancelledError:
-        yield error_event("CANCELLED", "生成已取消")
-    except Exception as ex:  # noqa: BLE001
-        logger.exception(
-            "diagnosis failed trace_id=%s session_id=%s",
-            req.trace_id,
-            req.session_id,
-        )
-        yield error_event("AGENT_ERROR", str(ex))
+
+            citations = state.get("citations") or []
+            if citations:
+                yield citation_event(citations)
+
+            if cancel_event.is_set():
+                yield error_event("CANCELLED", "生成已取消")
+                return
+
+            cfg = req.agent_config
+            messages = state.get("llm_messages") or []
+            had_error = False
+
+            async for evt in stream_chat(
+                messages,
+                model=cfg.model,
+                temperature=cfg.temperature,
+                cancel_event=cancel_event,
+                timeout_seconds=cfg.llm_timeout_seconds,
+                user_message=req.user_message,
+            ):
+                if evt.type == "error":
+                    had_error = True
+                yield evt
+
+            if had_error or cancel_event.is_set():
+                return
+
+            usage = pop_stream_usage()
+            if not usage:
+                usage = {"promptTokens": 0, "completionTokens": 0, "totalTokens": 0}
+
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            tool_calls = state.get("tool_calls") or []
+            yield done_event(
+                build_done_payload(
+                    intent=intent,
+                    model=cfg.model,
+                    latency_ms=latency_ms,
+                    usage=usage,
+                    citations=citations,
+                    tool_calls=tool_calls,
+                )
+            )
+            logger.info(
+                "event=chat.stream.end durationMs=%s intent=%s",
+                latency_ms,
+                intent,
+                extra={"trace_id": req.trace_id or "", "event": "chat.stream.end"},
+            )
+        except asyncio.CancelledError:
+            yield error_event("CANCELLED", "生成已取消")
+        except Exception as ex:  # noqa: BLE001
+            logger.exception(
+                "diagnosis failed trace_id=%s session_id=%s",
+                req.trace_id,
+                req.session_id,
+                extra={"trace_id": req.trace_id or ""},
+            )
+            yield error_event("AGENT_ERROR", str(ex))
+        finally:
+            CHAT_STREAM_DURATION.observe(time.perf_counter() - started)
