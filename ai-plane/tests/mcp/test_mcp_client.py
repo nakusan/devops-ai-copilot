@@ -7,8 +7,12 @@ from pydantic import ValidationError
 
 from app.mcp.client import mcp_client
 from app.mcp.resolver import resolve_tool_calls
-from app.mcp.whitelist import ReadonlySqlArgs, ensure_allowed, validate_arguments
-from app.mcp.whitelist import ToolNotAllowedError
+from app.mcp.whitelist import (
+    ReadonlySqlArgs,
+    ToolNotAllowedError,
+    ensure_allowed,
+    validate_arguments,
+)
 
 
 def test_whitelist_rejects_unknown_tool() -> None:

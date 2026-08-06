@@ -60,7 +60,9 @@ class JavaInternalClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def post_chunks_batch(self, document_id: UUID, chunks: list[dict[str, Any]]) -> dict[str, Any]:
+    async def post_chunks_batch(
+        self, document_id: UUID, chunks: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         body = {"documentId": str(document_id), "chunks": chunks}
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(

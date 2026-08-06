@@ -58,7 +58,7 @@ def build_messages(state: DiagnosisState) -> list[dict[str, str]]:
     messages.append(
         {
             "role": "user",
-            "content": f"上下文：\n{context_text}\n\n用户问题：{state['user_message']}",
+            "content": f"上下文：\n{context_text}\n\n用户问题：{state.get('user_message', '')}",
         }
     )
     return messages
@@ -66,13 +66,15 @@ def build_messages(state: DiagnosisState) -> list[dict[str, str]]:
 
 def build_citations_from_state(state: DiagnosisState) -> list[dict[str, Any]]:
     """从 state 提取 citations（优先已汇总的 citations 字段）。"""
-    if state.get("citations"):
-        return list(state["citations"])
+    citations = state.get("citations")
+    if citations:
+        return list(citations)
     return []
 
 def build_tool_calls_from_state(state: DiagnosisState) -> list[dict[str, Any]]:
-    if state.get("tool_calls"):
-        return list(state["tool_calls"])
+    tool_calls = state.get("tool_calls")
+    if tool_calls:
+        return list(tool_calls)
     return [
         {"tool": t.get("tool"), "result": t.get("result")}
         for t in (state.get("tool_results") or [])

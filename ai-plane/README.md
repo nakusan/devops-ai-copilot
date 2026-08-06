@@ -17,6 +17,11 @@ uv run python -m app.worker
 # 仅跑某一类：WORKER_ROLES=knowledge 或 WORKER_ROLES=analysis
 ```
 
+容器（与 control-plane 共用 `make stack-up`）：
+
+- HTTP 默认 `CMD`：`uvicorn app.main:app`
+- Worker：同一镜像，`command: python -m app.worker`
+
 内部接口：
 
 - `POST /internal/v1/chat/stream`（`application/x-ndjson`）

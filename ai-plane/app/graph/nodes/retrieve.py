@@ -21,7 +21,7 @@ async def retrieve_node(state: DiagnosisState) -> dict[str, Any]:
     started = time.perf_counter()
     with _tracer.start_as_current_span("rag.retrieve") as span:
         hits = await retriever_service.retrieve(
-            query=state["user_message"],
+            query=state.get("user_message", ""),
             top_k=int(cfg.get("rag_top_k", 5)),
             score_threshold=float(cfg.get("rag_score_threshold", 0.7)),
             team_id=team_id,

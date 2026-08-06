@@ -4,7 +4,10 @@ from app.analysis.parser.keyword_analyzer import analyze_text_sample, build_summ
 
 
 def test_analyze_and_summary():
-    text = "OutOfMemoryError happened. Full GC. java.lang.NullPointerException and IOException ERROR"
+    text = (
+        "OutOfMemoryError happened. Full GC. "
+        "java.lang.NullPointerException and IOException ERROR"
+    )
     parsed = analyze_text_sample(text, "APP_LOG")
     assert parsed["keyword_counts"]["OOM"] >= 1
     assert parsed["keyword_counts"]["FULL_GC"] >= 1

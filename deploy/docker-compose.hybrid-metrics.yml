@@ -1,0 +1,9 @@
+# 可选覆盖：应用在宿主机、仅中间件进 Compose 时，让 Prometheus 经宿主机端口抓取。
+# 与 docker-compose.yml 叠用：
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.hybrid-metrics.yml up -d
+
+services:
+  prometheus:
+    volumes:
+      - ./prometheus/prometheus.hybrid.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus

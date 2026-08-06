@@ -2,70 +2,81 @@
 
 企业内部研发/运维 **AI 辅助排查平台**后端：控制面（Java / Spring Boot）+ 智能面（Python / FastAPI），通过 RAG、Agent（LangGraph）与 MCP 串联私有知识、异步文件分析与实时监控数据。
 
-> 当前进度：**Phase 2 跨语言流式**（Java SSE ↔ Python Mock NDJSON + Message 落库）。  
+> 当前进度：**Phase 6 / W12 容器化交付**（多阶段 Dockerfile + Compose 全栈 + CI）。  
 > 设计资料：[`docs/`](docs/) · 任务进度：[`docs/implementation-tasks.md`](docs/implementation-tasks.md)
 
 ## 仓库结构
 
 ```text
 control-plane/   Java 21 + Spring Boot 3（公网唯一入口 / SSE 终点）
-ai-plane/        Python 3.12 + FastAPI（内网 NDJSON 流；本阶段为 Mock）
-deploy/          docker-compose、postgres 分表 SQL、监控占位
-docs/            架构与模块设计书（勿删）
+ai-plane/        Python 3.12 + FastAPI（内网 NDJSON 流 + LangGraph / MCP）
+deploy/          docker-compose、postgres SQL、Prometheus/Grafana
+docs/            架构与模块设计书
+.github/         CI（编译测试 / Ruff / Pytest / Docker build）
 ```
 
 ## 本地快速开始
 
+### 方式 A：全栈一键（推荐演示）
+
 ```bash
-# 1) 中间件
-make infra-up
-
-# 2) 智能面（Mock 流）
-cd ai-plane && uv sync --extra dev
-uv run uvicorn app.main:app --reload --port 8000
-
-# 3) 控制面（另开终端）
-cd control-plane && mvn spring-boot:run
+cp deploy/.env.example deploy/.env   # 可按需改密钥 / LLM
+make stack-up                        # 中间件 + control-plane + ai-plane + worker
 ```
 
 | 服务 | 地址 |
 |------|------|
 | control-plane | http://localhost:8080 |
 | ai-plane | http://localhost:8000 |
-| PostgreSQL | localhost:5432（copilot/copilot） |
-| Redis | localhost:6379 |
+| Grafana | http://localhost:3000（admin/admin） |
+| Prometheus | http://localhost:9090（全栈用服务名抓取 `control-plane`/`ai-plane`） |
+| MinIO Console | http://localhost:9001 |
 
-两侧 `SERVICE_TOKEN_SECRET` / `copilot.service-token.secret` 必须一致（默认已对齐开发密钥）。
+停止：`make stack-down`。
+
+> 工程化约定（学习向）：RAG 使用只读库账号 `copilot_ro`；CI 含 Ruff + Pyright + 测试 + 镜像构建；监控在 Compose 网络内用服务发现。
+
+### 方式 B：中间件进 Docker，应用本机跑（日常开发）
+
+```bash
+make infra-up
+
+# 智能面 HTTP
+cd ai-plane && uv sync --extra dev
+uv run uvicorn app.main:app --reload --port 8000
+
+# 独立 Worker（另开终端）
+export KAFKA_BOOTSTRAP=localhost:9092
+uv run python -m app.worker
+
+# 控制面（另开终端）
+cd control-plane && mvn spring-boot:run
+```
+
+Kafka：**宿主机**用 `localhost:9092`，**Compose 内应用**用 `kafka:29092`（双监听，见 `deploy/docker-compose.yml` 注释）。
+
+两侧 `SERVICE_TOKEN_SECRET` 必须一致（默认已对齐开发密钥）。
 
 ### 联调示例
 
 种子账号：`admin` / `Admin123!`，默认 Agent id=`1`。
 
 ```bash
-# 登录
 TOKEN=$(curl -s http://localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"Admin123!"}' | jq -r .accessToken)
 
-# 创建 Session
 SID=$(curl -s http://localhost:8080/api/v1/sessions \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"agentId":1,"title":"排查 STATUS_899"}' | jq -r .id)
 
-# SSE 聊天（--no-buffer 边收边打）
 curl -N --no-buffer -X POST "http://localhost:8080/api/v1/sessions/$SID/chat" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: text/event-stream' \
   -d '{"content":"今日早盘 STATUS_899 是什么原因？","clientMessageId":"demo-1"}'
-
-# 历史消息分页
-curl -s "http://localhost:8080/api/v1/sessions/$SID/messages?page=1&size=20" \
-  -H "Authorization: Bearer $TOKEN"
 ```
-
-SSE 事件：`token` / `done` / `error`（本阶段 Python 为 Mock 回显，Week 6 换 LangGraph+真 LLM）。
 
 ## 开发约定（生产级基线）
 
@@ -91,12 +102,13 @@ SSE 事件：`token` / `done` / `error`（本阶段 Python 为 Mock 回显，Wee
 
 ```bash
 make help
-make java-compile
-make python-sync
-make python-lint
+make stack-up / stack-down
+make infra-up / infra-down
+make java-test
+make python-lint python-test
 make ci-local
 ```
 
 ## 技术栈（摘要）
 
-Java 21 · Spring Boot 3.3 · Spring Security · WebClient · JJWT · MyBatis Plus · PostgreSQL + pgvector · Redis · Kafka · MinIO · FastAPI ·（后续）LangGraph · OpenTelemetry · Prometheus/Grafana
+Java 21 · Spring Boot 3.3 · Spring Security · WebClient · JJWT · MyBatis Plus · PostgreSQL + pgvector · Redis · Kafka · MinIO · FastAPI · LangGraph · MCP · OpenTelemetry · Prometheus/Grafana · Docker Compose · GitHub Actions

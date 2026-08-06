@@ -1,5 +1,14 @@
-# 仅中间件本地开发栈（Phase 0）。
-# 应用服务（control-plane / ai-plane）在后续周次加入。
+# DevOps AI Copilot — 本地一键编排（Phase 6 / W12）
+#
+# 用法：
+#   仅中间件（本机跑应用）：  docker compose up -d
+#   全栈（含双栈应用）：      docker compose --profile apps up -d --build
+#   或：make infra-up / make stack-up
+#
+# Kafka 双监听（W12 补全 Phase 4 延后项）：
+#   - PLAINTEXT://localhost:9092     → 宿主机进程（mvn / uv）
+#   - PLAINTEXT_INTERNAL://kafka:29092 → Compose 内应用容器
+# 否则容器内客户端连 localhost:9092 会打到自己，导致生产/消费失败。
 
 name: devops-ai-copilot
 
@@ -42,10 +51,13 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # 三监听：对外 / 容器互联 / 控制器
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      # broker 间通信走内部监听，避免 advertised localhost 在容器网络失效
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -93,7 +105,126 @@ services:
       "
     restart: "no"
 
-  # Phase 5 / W10：可观测栈。应用仍本机运行，经 host.docker.internal 抓取。
+  # ---------- 应用（profile=apps；make stack-up）----------
+  # MCP Mock：进程内 stdio spawn（设计 6.6 方式 A），无需独立容器
+
+  control-plane:
+    profiles: ["apps"]
+    build:
+      context: ../control-plane
+      dockerfile: Dockerfile
+    image: dac-control-plane:local
+    container_name: dac-control-plane
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: copilot
+      DB_USER: copilot
+      DB_PASSWORD: copilot
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP: kafka:29092
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: devops-copilot
+      AI_PLANE_BASE_URL: http://ai-plane:8000
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-to-a-long-random-secret-key}
+      SERVICE_TOKEN_SECRET: ${SERVICE_TOKEN_SECRET:-dev-only-service-token-secret-change-me}
+      # 容器日志走 JSON，便于集中采集（本机开发可不设）
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-json}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      # 不硬等 ai-plane：WebClient 懒连接；避免与「Python 回调 Java」形成编排死锁感
+    restart: unless-stopped
+
+  ai-plane:
+    profiles: ["apps"]
+    build:
+      context: ../ai-plane
+      dockerfile: Dockerfile
+    image: dac-ai-plane:local
+    container_name: dac-ai-plane
+    ports:
+      - "8000:8000"
+    environment:
+      SERVICE_TOKEN_SECRET: ${SERVICE_TOKEN_SECRET:-dev-only-service-token-secret-change-me}
+      JAVA_INTERNAL_BASE_URL: http://control-plane:8080
+      # 最小权限：只读角色（13_readonly_role.sql）；禁止 RAG 路径写库
+      DATABASE_READONLY_URL: postgresql://copilot_ro:copilot_ro@postgres:5432/copilot
+      KAFKA_BOOTSTRAP: kafka:29092
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: devops-copilot
+      MINIO_SECURE: "false"
+      LLM_MODE: ${LLM_MODE:-mock}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      CHAT_BACKEND: orchestrator
+      MCP_ENABLED: "true"
+      OTEL_SERVICE_NAME: ai-plane
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    # ai-plane HTTP 不强制等 control-plane：避免循环依赖（Java 依赖 Python health）
+    # Worker / 回调路径在 control-plane 起来后自然可用
+    restart: unless-stopped
+
+  # 独立 Kafka Worker（与 HTTP 分进程，对齐 Phase 4 决策）
+  ai-plane-worker:
+    profiles: ["apps"]
+    image: dac-ai-plane:local
+    container_name: dac-ai-plane-worker
+    build:
+      context: ../ai-plane
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker"]
+    environment:
+      SERVICE_TOKEN_SECRET: ${SERVICE_TOKEN_SECRET:-dev-only-service-token-secret-change-me}
+      JAVA_INTERNAL_BASE_URL: http://control-plane:8080
+      DATABASE_READONLY_URL: postgresql://copilot_ro:copilot_ro@postgres:5432/copilot
+      KAFKA_BOOTSTRAP: kafka:29092
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: devops-copilot
+      MINIO_SECURE: "false"
+      LLM_MODE: ${LLM_MODE:-mock}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      WORKER_ROLES: knowledge,analysis
+      OTEL_SERVICE_NAME: ai-plane
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      control-plane:
+        condition: service_healthy
+    # Worker 无 HTTP，关闭镜像默认 healthcheck
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  # Phase 5 / W10：可观测栈（发布态：同网络服务名抓取，见 prometheus/prometheus.yml）
+  # 应用未启动时 target 会 DOWN，属预期；全栈 stack-up 后应 UP。
+  # 宿主机跑应用时叠用：-f deploy/docker-compose.hybrid-metrics.yml
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: dac-prometheus
@@ -107,7 +238,6 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     extra_hosts:
-      # WSL2 / Linux Docker：把 host.docker.internal 指到宿主机网关
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 

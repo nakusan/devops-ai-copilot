@@ -30,7 +30,8 @@ def download_to_temp(object_key: str) -> Path:
     suffix = Path(object_key).suffix or ".bin"
     client = _client()
     response = None
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    # delete=False：返回 Path 给调用方异步处理后再 unlink；不能用 with（退出即关闭路径失效）
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)  # noqa: SIM115
     try:
         response = client.get_object(settings.minio_bucket, object_key)
         for chunk in response.stream(32 * 1024):

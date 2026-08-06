@@ -21,7 +21,7 @@ async def tool_node(state: DiagnosisState) -> dict[str, Any]:
     if not cfg.get("enable_mcp", True):
         return {"tool_results": [], "tool_calls": []}
 
-    calls = resolve_tool_calls(state["user_message"], cfg)
+    calls = resolve_tool_calls(state.get("user_message", ""), cfg)
     results: list[dict[str, Any]] = []
     tool_calls: list[dict[str, Any]] = []
     trace_id = state.get("trace_id")

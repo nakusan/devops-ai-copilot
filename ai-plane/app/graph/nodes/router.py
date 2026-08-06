@@ -44,7 +44,7 @@ def router_node(state: DiagnosisState) -> dict[str, Any]:
 
     优先级：analysis > rag_and_tool > tool > rag > 默认 rag/direct。
     """
-    msg = state["user_message"]
+    msg = state.get("user_message", "")
     cfg = state.get("agent_config") or {}
     enable_rag = cfg.get("enable_rag", True)
     enable_mcp = cfg.get("enable_mcp", True)

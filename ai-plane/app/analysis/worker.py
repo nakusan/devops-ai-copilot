@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from pathlib import Path
@@ -62,8 +63,7 @@ async def handle_analysis_ingest(event: AnalysisIngestEvent, *, retry_count: int
         )
         raise
     finally:
+        # 清理临时文件：忽略并发删除 / 权限等 OSError，避免掩盖业务异常
         if tmp is not None:
-            try:
+            with contextlib.suppress(OSError):
                 tmp.unlink(missing_ok=True)
-            except OSError:
-                pass

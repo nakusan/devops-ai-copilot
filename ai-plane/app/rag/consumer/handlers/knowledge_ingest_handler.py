@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from pathlib import Path
@@ -33,7 +34,7 @@ async def handle_knowledge_ingest(event: KnowledgeIngestEvent, *, retry_count: i
     tmp: Path | None = None
     started = time.perf_counter()
     with _tracer.start_as_current_span("ingest.process") as span:
-        span.set_attribute("ingest.job_id", event.job_id)
+        span.set_attribute("ingest.job_id", str(event.job_id))
         try:
             tmp = await asyncio.to_thread(download_to_temp, event.object_key)
             raw_text = await asyncio.to_thread(parse_document, tmp, event.mime_type)
@@ -77,7 +78,5 @@ async def handle_knowledge_ingest(event: KnowledgeIngestEvent, *, retry_count: i
             raise
         finally:
             if tmp is not None:
-                try:
+                with contextlib.suppress(OSError):
                     tmp.unlink(missing_ok=True)
-                except OSError:
-                    pass

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import signal
 from collections.abc import Callable, Coroutine
@@ -60,11 +61,9 @@ async def _run() -> None:
 
     # SIGTERM/SIGINT：容器编排与 Ctrl+C 统一走优雅退出
     for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
+        # Windows 等不支持 add_signal_handler；仍可用 KeyboardInterrupt
+        with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, _request_stop)
-        except NotImplementedError:
-            # Windows 等不支持 add_signal_handler 时忽略；仍可用 KeyboardInterrupt
-            pass
 
     from app.consumers.analysis_ingest import run_analysis_ingest_consumer
     from app.consumers.knowledge_ingest import run_knowledge_ingest_consumer

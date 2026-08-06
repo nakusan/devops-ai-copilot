@@ -32,11 +32,14 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         trace_id, span_id = _current_trace_context()
-        # 允许业务通过 extra= 覆盖 / 补充（如 orchestrator 传入的 trace_id）
-        if getattr(record, "trace_id", None):
-            trace_id = str(record.trace_id)
-        if getattr(record, "span_id", None):
-            span_id = str(record.span_id)
+        # LogRecord 标准类型无这些字段；业务经 logger.info(..., extra={...}) 注入
+        # 走 __dict__ 同时满足 pyright（无属性）与 ruff（避免 B009）
+        extra_trace = record.__dict__.get("trace_id")
+        if extra_trace:
+            trace_id = str(extra_trace)
+        extra_span = record.__dict__.get("span_id")
+        if extra_span:
+            span_id = str(extra_span)
 
         payload: dict[str, Any] = {
             "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -47,8 +50,9 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        if hasattr(record, "event"):
-            payload["event"] = record.event
+        event = record.__dict__.get("event")
+        if event is not None:
+            payload["event"] = event
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)

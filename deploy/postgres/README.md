@@ -18,6 +18,13 @@
 | `10_seed_agent.sql` | 默认诊断 Agent |
 | `11_seed_admin_user.sql` | 本地 admin / Admin123! |
 | `12_seed_knowledge_rag.sql` | RAG 验收种子（STATUS_899 + 固定向量） |
+| `13_readonly_role.sql` | `copilot_ro` 只读角色（仅 SELECT 知识表） |
 
 Compose 将本目录挂载到 `/docker-entrypoint-initdb.d`。
 脚本**仅在数据卷首次为空时**执行。
+
+若数据卷已存在、需要补建只读角色，可手动执行：
+
+```bash
+docker exec -i dac-postgres psql -U copilot -d copilot < deploy/postgres/13_readonly_role.sql
+```

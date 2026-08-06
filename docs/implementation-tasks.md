@@ -3,7 +3,7 @@
 > 状态约定：`[ ]` 未做 · `[~]` 进行中 · `[x]` 完成  
 > 设计资料见同目录其他文档；**本文件仅跟踪实施进度，不替代设计书**。
 
-最后更新：2026-08-04
+最后更新：2026-08-05
 
 ---
 
@@ -91,7 +91,7 @@
 - Transactional Outbox / PENDING 补偿 Job（V1）
 - MAT 级 Heap 分析（V2）
 - chunks/batch HTTP 分批（维持一次全量提交）
-- Kafka advertised listeners 进 Compose 改造（维持 localhost）
+- ~~Kafka advertised listeners 进 Compose 改造（维持 localhost）~~ → **W12 已补全双监听**
 
 ### Phase 4 补充决策
 
@@ -116,7 +116,12 @@
 
 ## Phase 6 — Week 12 交付
 
-- [ ] W12 多阶段 Dockerfile + Compose 全服务 + CI 完善
+- [x] W12 多阶段 Dockerfile + Compose 全服务 + CI 完善
+  - `control-plane/Dockerfile`、`ai-plane/Dockerfile`（多阶段；非 root；healthcheck）
+  - Compose：`profile=apps` 拉起 control-plane / ai-plane / ai-plane-worker；Kafka 双监听
+  - CI：Java `test`+`package`；Python ruff + **pyright** + pytest；Docker buildx + compose config
+  - 工程化补强：`copilot_ro` 只读角色；Prometheus 容器服务发现抓取
+  - Makefile：`stack-up` / `stack-down`；`ci-local` 对齐本地检查
 
 ---
 

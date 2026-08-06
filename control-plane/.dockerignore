@@ -1,0 +1,9 @@
+target/
+.idea/
+*.iml
+*.class
+*.log
+.git/
+.gitignore
+.DS_Store
+src/test/

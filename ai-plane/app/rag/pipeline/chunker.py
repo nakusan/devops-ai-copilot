@@ -17,7 +17,12 @@ class ChunkConfig:
     )
 
 
-def chunk_text(text: str, cfg: ChunkConfig | None = None, *, base_metadata: dict | None = None) -> list[TextChunk]:
+def chunk_text(
+    text: str,
+    cfg: ChunkConfig | None = None,
+    *,
+    base_metadata: dict | None = None,
+) -> list[TextChunk]:
     """按分隔符递归切分，保证每块 ≤ chunk_size，相邻 overlap。"""
     cfg = cfg or ChunkConfig()
     meta = base_metadata or {}
