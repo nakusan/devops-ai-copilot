@@ -36,6 +36,8 @@ spring:
       timeout: 2s
 
 mybatis-plus:
+  # 扫描 UUID↔PG UUID TypeHandler，避免 autoResultMap 实体启动失败
+  type-handlers-package: com.devops.copilot.common.mybatis
   configuration:
     map-underscore-to-camel-case: true
     # 开发期可打开；生产建议关闭或改 slf4j

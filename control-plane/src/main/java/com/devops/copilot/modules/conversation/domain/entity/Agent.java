@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.devops.copilot.common.mybatis.JsonbTypeHandler;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -12,7 +12,7 @@ import java.util.Map;
 
 /**
  * Agent 配置实体，对应 03_agents.sql。
- * config_json 用 JacksonTypeHandler 映射 JSONB。
+ * config_json 用 JsonbTypeHandler 映射 PostgreSQL JSONB。
  */
 @TableName(value = "agents", autoResultMap = true)
 public class Agent {
@@ -36,7 +36,7 @@ public class Agent {
 
     private BigDecimal temperature;
 
-    @TableField(value = "config_json", typeHandler = JacksonTypeHandler.class)
+    @TableField(value = "config_json", typeHandler = JsonbTypeHandler.class)
     private Map<String, Object> configJson;
 
     @TableField("created_at")

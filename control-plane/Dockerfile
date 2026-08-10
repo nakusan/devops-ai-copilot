@@ -1,9 +1,10 @@
-# syntax=docker/dockerfile:1
 # 多阶段构建：Maven 编译 → 精简 JRE 运行时（Phase 6 / W12）
 #
 # 为何多阶段：
 # - build 阶段需要完整 JDK + Maven 依赖缓存，体积大
 # - runtime 只需 JRE + fat jar，缩小攻击面与镜像体积
+# 注：不写 # syntax=docker/dockerfile:1，避免构建时强制拉取
+# docker.io/docker/dockerfile（国内/受限网络常超时）。
 
 # ---------- build ----------
 FROM maven:3.9.9-eclipse-temurin-21 AS build

@@ -1,10 +1,11 @@
-# syntax=docker/dockerfile:1
 # 多阶段构建：uv 同步依赖 → 精简 Python 运行时（Phase 6 / W12）
 #
 # 同一镜像两种用途（Compose 用 command 覆盖）：
 # - HTTP：uvicorn app.main:app
 # - Worker：python -m app.worker
 # 避免维护两份镜像，符合「API + Worker 同代码不同进程」业界形态。
+# 注：不写 # syntax=docker/dockerfile:1，避免构建时强制拉取
+# docker.io/docker/dockerfile（国内/受限网络常超时）。
 
 # ---------- build ----------
 FROM python:3.12-slim-bookworm AS build

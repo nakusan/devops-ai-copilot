@@ -21,7 +21,7 @@ services:
       POSTGRES_PASSWORD: copilot
       POSTGRES_DB: copilot
     ports:
-      - "5432:5432"
+      - "25432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres:/docker-entrypoint-initdb.d:ro
@@ -249,7 +249,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "3000:3000"
+      - "3600:3000"
     volumes:
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro

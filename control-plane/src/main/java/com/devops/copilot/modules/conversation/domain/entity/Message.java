@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.devops.copilot.common.mybatis.JsonbTypeHandler;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -28,7 +28,7 @@ public class Message {
     @TableField("token_count")
     private Integer tokenCount;
 
-    @TableField(value = "metadata_json", typeHandler = JacksonTypeHandler.class)
+    @TableField(value = "metadata_json", typeHandler = JsonbTypeHandler.class)
     private Map<String, Object> metadataJson;
 
     @TableField("client_message_id")

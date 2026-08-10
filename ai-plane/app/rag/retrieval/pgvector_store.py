@@ -1,6 +1,8 @@
 """pgvector 只读检索 — team 过滤 + embedding 版本过滤。"""
 
+import json
 import logging
+from typing import Any
 
 import asyncpg
 
@@ -32,6 +34,33 @@ def _vector_to_pg_literal(values: list[float]) -> str:
     """asyncpg 接受 '[...]'::vector 字符串形式。"""
     inner = ",".join(f"{v:.8f}" for v in values)
     return f"[{inner}]"
+
+
+def _parse_metadata_json(raw: Any) -> dict[str, Any]:
+    """asyncpg 默认把 JSONB 当 str 返回；已解码为 dict 时直接拷贝。
+
+    切勿对 JSON 字符串使用 dict(...)：会按字符序列解析并抛
+    ``dictionary update sequence element #0 has length 1; 2 is required``。
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        if not raw.strip():
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("metadata_json 非合法 JSON，忽略")
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    if isinstance(raw, memoryview):
+        return _parse_metadata_json(raw.tobytes().decode("utf-8"))
+    if isinstance(raw, bytes | bytearray):
+        return _parse_metadata_json(raw.decode("utf-8"))
+    logger.warning("metadata_json 类型异常 type=%s，忽略", type(raw).__name__)
+    return {}
 
 
 class PgVectorStore:
@@ -91,7 +120,7 @@ class PgVectorStore:
                     document_title=row["document_title"],
                     content=row["content"],
                     score=float(row["score"]),
-                    metadata=dict(row["metadata_json"] or {}),
+                    metadata=_parse_metadata_json(row["metadata_json"]),
                 )
             )
         return hits
