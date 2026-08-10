@@ -46,3 +46,7 @@ htmlcov/
 
 # --- Docker 本地数据卷 ---
 deploy/data/
+
+# --- Web 前端 ---
+web/node_modules/
+web/dist/

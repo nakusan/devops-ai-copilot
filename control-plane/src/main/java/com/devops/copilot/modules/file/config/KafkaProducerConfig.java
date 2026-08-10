@@ -25,13 +25,14 @@ public class KafkaProducerConfig {
     public ProducerFactory<String, Object> ingestProducerFactory(
             KafkaProperties kafkaProperties, ObjectMapper objectMapper) {
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(null));
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        // 跨语言：不要 Java 类型头
+        // 序列化器实例由 factory 注入；剥离 YAML 中的 serializer 类名，避免与 setValueSerializer 冲突
+        props.remove(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
+        props.remove(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG);
+        props.keySet().removeIf(k -> k.toString().startsWith("spring.json."));
+        // 仅通过 configure(properties) 关闭类型头；不可再调用 setAddTypeInfo（会与 configure 互斥）
         props.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
 
         JsonSerializer<Object> valueSerializer = new JsonSerializer<>(objectMapper);
-        valueSerializer.setAddTypeInfo(false);
 
         DefaultKafkaProducerFactory<String, Object> factory =
                 new DefaultKafkaProducerFactory<>(props);

@@ -1,6 +1,6 @@
 .PHONY: help infra-up infra-down infra-ps stack-up stack-down stack-ps \
 	java-compile java-test python-sync python-lint python-typecheck python-test \
-	python-worker ci-local
+	python-worker web-install web-dev web-build ci-local
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
@@ -19,6 +19,9 @@ help:
 	@echo "  python-typecheck  对 ai-plane 执行 pyright"
 	@echo "  python-test    运行 ai-plane pytest"
 	@echo "  python-worker  启动独立 Kafka Worker（需 KAFKA_BOOTSTRAP）"
+	@echo "  web-install    安装 web 前端依赖"
+	@echo "  web-dev        启动 web 前端开发服务器（:5173）"
+	@echo "  web-build      构建 web 前端静态资源"
 	@echo "  ci-local       本地执行与 CI 等价的检查（不含 Docker build）"
 
 infra-up:
@@ -60,5 +63,14 @@ python-test:
 
 python-worker:
 	cd ai-plane && uv run python -m app.worker
+
+web-install:
+	cd web && npm install
+
+web-dev:
+	cd web && npm run dev
+
+web-build:
+	cd web && npm run build
 
 ci-local: java-test python-sync python-lint python-typecheck python-test

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DevOps AI Copilot</title>
+    <link rel="stylesheet" href="/css/layout.css" />
+    <link rel="stylesheet" href="/css/chat.css" />
+  </head>
+  <body>
+    <div id="app" class="app hidden">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span class="brand">DevOps Copilot</span>
+        </div>
+        <button type="button" id="btn-new-chat" class="btn-new-chat">+ 新对话</button>
+        <div id="session-list" class="session-list"></div>
+        <div class="sidebar-footer">
+          <button type="button" id="btn-files" class="btn-link">文件</button>
+          <div class="user-menu">
+            <span id="username-label"></span>
+            <button type="button" id="btn-logout" class="btn-link">退出</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div id="chat-area" class="chat-area">
+          <div id="empty-state" class="empty-state">
+            <h2>开始对话</h2>
+            <p>描述你的运维问题，或上传日志 / 文档后提问</p>
+          </div>
+          <div id="messages" class="messages hidden"></div>
+        </div>
+
+        <div class="composer-wrap">
+          <div id="file-chip" class="file-chip hidden">
+            <span id="file-chip-name"></span>
+            <button type="button" id="file-chip-clear" aria-label="取消">×</button>
+          </div>
+          <div class="composer">
+            <textarea
+              id="message-input"
+              rows="1"
+              placeholder="输入你的问题..."
+            ></textarea>
+            <div class="composer-actions">
+              <button type="button" id="btn-attach" class="btn-icon" title="上传文件">📎</button>
+              <input type="file" id="file-input" class="hidden" />
+              <button type="button" id="btn-send" class="btn-send" title="发送">↑</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- 登录 / 注册 -->
+    <div id="auth-overlay" class="overlay">
+      <div class="modal auth-modal">
+        <h2>DevOps AI Copilot</h2>
+        <div class="tabs">
+          <button type="button" class="tab active" data-tab="login">登录</button>
+          <button type="button" class="tab" data-tab="register">注册</button>
+        </div>
+        <form id="auth-form">
+          <label>
+            用户名
+            <input type="text" id="auth-username" autocomplete="username" required minlength="3" />
+          </label>
+          <label>
+            密码
+            <input type="password" id="auth-password" autocomplete="current-password" required minlength="8" />
+          </label>
+          <p id="auth-error" class="error-text hidden"></p>
+          <button type="submit" class="btn-primary" id="auth-submit">登录</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 文件列表面板 -->
+    <div id="files-overlay" class="overlay hidden">
+      <div class="modal files-modal">
+        <div class="modal-header">
+          <h2>我的文件</h2>
+          <button type="button" id="btn-files-close" class="btn-icon">×</button>
+        </div>
+        <div class="tabs">
+          <button type="button" class="tab active" data-files-tab="knowledge">知识库</button>
+          <button type="button" class="tab" data-files-tab="analysis">分析任务</button>
+        </div>
+        <div id="files-content" class="files-content"></div>
+      </div>
+    </div>
+
+    <!-- .txt 文件用途选择 -->
+    <div id="txt-choice-overlay" class="overlay hidden">
+      <div class="modal txt-choice-modal">
+        <h3>选择用途</h3>
+        <p id="txt-choice-filename"></p>
+        <div class="txt-choice-actions">
+          <button type="button" id="txt-knowledge" class="btn-primary">入库知识库</button>
+          <button type="button" id="txt-analysis" class="btn-secondary">提交分析</button>
+          <button type="button" id="txt-cancel" class="btn-link">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>
