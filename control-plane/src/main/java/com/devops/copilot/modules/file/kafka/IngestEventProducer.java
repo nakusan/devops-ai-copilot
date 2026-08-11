@@ -3,6 +3,7 @@ package com.devops.copilot.modules.file.kafka;
 import com.devops.copilot.modules.file.config.KafkaTopicProperties;
 import com.devops.copilot.modules.file.kafka.event.AnalysisIngestEvent;
 import com.devops.copilot.modules.file.kafka.event.KnowledgeIngestEvent;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
 import com.devops.copilot.observability.metrics.IngestMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,34 +40,49 @@ public class IngestEventProducer {
 
     public long publishKnowledgeIngest(KnowledgeIngestEvent event) {
         String topic = topicProperties.getTopics().getKnowledgeIngest();
-        // key=documentId：同文档消息落到同一分区，保证有序
-        return send(topic, event.getDocumentId().toString(), event);
+        return send("knowledge", topic, event.getDocumentId().toString(), event, event.getJobId(), event.getTraceId());
     }
 
     public long publishAnalysisIngest(AnalysisIngestEvent event) {
         String topic = topicProperties.getTopics().getAnalysisIngest();
-        return send(topic, event.getJobId().toString(), event);
+        send("analysis", topic, event.getJobId().toString(), event, event.getJobId(), event.getTraceId());
+        return -1L;
     }
 
     public void publishKnowledgeDlq(KnowledgeIngestEvent event) {
-        send(topicProperties.getTopics().getKnowledgeDlq(), event.getDocumentId().toString(), event);
+        String topic = topicProperties.getTopics().getKnowledgeDlq();
+        send("knowledge", topic, event.getDocumentId().toString(), event, event.getJobId(), event.getTraceId());
     }
 
     public void publishAnalysisDlq(AnalysisIngestEvent event) {
-        send(topicProperties.getTopics().getAnalysisDlq(), event.getJobId().toString(), event);
+        String topic = topicProperties.getTopics().getAnalysisDlq();
+        send("analysis", topic, event.getJobId().toString(), event, event.getJobId(), event.getTraceId());
     }
 
-    private long send(String topic, String key, Object event) {
+    private long send(
+            String kind, String topic, String key, Object event, java.util.UUID jobId, String traceId) {
+        log.info(IngestFlowLog.msg(
+                kind,
+                "06.kafka_send",
+                "topic=" + topic + " key=" + key + " jobId=" + jobId + " traceId=" + traceId));
         try {
             CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(topic, key, event);
             SendResult<String, Object> result = future.get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             long offset = result.getRecordMetadata().offset();
             ingestMetrics.recordPublishSuccess(topic);
-            log.info("kafka published topic={} key={} offset={}", topic, key, offset);
+            log.info(IngestFlowLog.msg(
+                    kind,
+                    "06.kafka_ok",
+                    "topic=" + topic + " key=" + key + " offset=" + offset + " jobId=" + jobId));
             return offset;
         } catch (Exception ex) {
             ingestMetrics.recordPublishFailure(topic);
-            log.error("kafka publish failed topic={} key={}", topic, key, ex);
+            log.error(IngestFlowLog.msg(
+                    kind,
+                    "06.kafka_fail",
+                    "topic=" + topic + " key=" + key + " jobId=" + jobId
+                            + " error=\"" + IngestFlowLog.preview(ex.getMessage()) + "\""),
+                    ex);
             throw new IllegalStateException("KAFKA_PUBLISH_FAILED: " + ex.getMessage(), ex);
         }
     }

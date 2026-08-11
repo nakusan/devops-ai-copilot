@@ -4,8 +4,11 @@ import com.devops.copilot.common.security.SecurityUtils;
 import com.devops.copilot.modules.conversation.controller.dto.PageResponse;
 import com.devops.copilot.modules.file.controller.dto.IngestResponse;
 import com.devops.copilot.modules.file.controller.dto.KnowledgeDocumentResponse;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
 import com.devops.copilot.modules.file.service.KnowledgeIngestService;
 import com.devops.copilot.modules.security.domain.UserPrincipal;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,6 +25,9 @@ import java.util.UUID;
 @RequestMapping("/api/v1/knowledge/documents")
 public class KnowledgeDocumentController {
 
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeDocumentController.class);
+    private static final String KIND = "knowledge";
+
     private final KnowledgeIngestService knowledgeIngestService;
 
     public KnowledgeDocumentController(KnowledgeIngestService knowledgeIngestService) {
@@ -34,7 +40,23 @@ public class KnowledgeDocumentController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "title", required = false) String title) {
         UserPrincipal user = SecurityUtils.currentUser();
-        return knowledgeIngestService.ingest(file, user.getUserId(), user.getTeamId(), title);
+        String filename = file.getOriginalFilename() == null ? "unknown" : file.getOriginalFilename();
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "01.recv",
+                "userId=" + user.getUserId()
+                        + " teamId=" + user.getTeamId()
+                        + " filename=\"" + IngestFlowLog.preview(filename) + "\""
+                        + " sizeBytes=" + file.getSize()
+                        + " title=\"" + IngestFlowLog.preview(title) + "\""));
+        IngestResponse resp = knowledgeIngestService.ingest(file, user.getUserId(), user.getTeamId(), title);
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "07.accepted",
+                "documentId=" + resp.documentId()
+                        + " jobId=" + resp.jobId()
+                        + " status=" + resp.status()));
+        return resp;
     }
 
     @GetMapping("/{id}")

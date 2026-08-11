@@ -3,6 +3,7 @@ package com.devops.copilot.modules.file.service;
 import com.devops.copilot.common.exception.BizException;
 import com.devops.copilot.common.exception.ErrorCode;
 import com.devops.copilot.modules.file.config.MinioProperties;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.StatObjectArgs;
@@ -33,10 +34,15 @@ public class FileStorageService {
         return properties.getBucket();
     }
 
+    public void uploadStream(String objectKey, InputStream in, long size, String contentType) {
+        uploadStream(objectKey, in, size, contentType, "file");
+    }
+
     /**
+     * @param kind 日志用：knowledge | analysis
      * @param size 已知长度时传入；未知可用 -1，由 SDK 走 multipart
      */
-    public void uploadStream(String objectKey, InputStream in, long size, String contentType) {
+    public void uploadStream(String objectKey, InputStream in, long size, String contentType, String kind) {
         try {
             PutObjectArgs.Builder builder = PutObjectArgs.builder()
                     .bucket(properties.getBucket())
@@ -46,9 +52,18 @@ public class FileStorageService {
                 builder.contentType(contentType);
             }
             minioClient.putObject(builder.build());
-            log.info("minio uploaded objectKey={} size={}", objectKey, size);
+            log.info(IngestFlowLog.msg(
+                    kind,
+                    "04.minio_upload",
+                    "bucket=" + properties.getBucket()
+                            + " objectKey=" + objectKey
+                            + " sizeBytes=" + size
+                            + " contentType=" + contentType));
         } catch (Exception ex) {
-            log.error("minio upload failed objectKey={}", objectKey, ex);
+            log.error(IngestFlowLog.msg(
+                    kind,
+                    "04.minio_fail",
+                    "objectKey=" + objectKey + " error=\"" + IngestFlowLog.preview(ex.getMessage()) + "\""));
             throw new BizException(ErrorCode.STORAGE_ERROR, "上传对象存储失败");
         }
     }

@@ -13,6 +13,7 @@ import com.devops.copilot.modules.file.domain.entity.KnowledgeDocument;
 import com.devops.copilot.modules.file.domain.enums.JobStatus;
 import com.devops.copilot.modules.file.kafka.IngestEventProducer;
 import com.devops.copilot.modules.file.kafka.event.KnowledgeIngestEvent;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
 import com.devops.copilot.modules.file.mapper.IngestJobMapper;
 import com.devops.copilot.modules.file.mapper.KnowledgeDocumentMapper;
 import org.slf4j.Logger;
@@ -34,6 +35,7 @@ import java.util.UUID;
 public class KnowledgeIngestService {
 
     private static final Logger log = LoggerFactory.getLogger(KnowledgeIngestService.class);
+    private static final String KIND = "knowledge";
 
     private final KnowledgeDocumentMapper documentMapper;
     private final IngestJobMapper ingestJobMapper;
@@ -56,9 +58,16 @@ public class KnowledgeIngestService {
 
     @Transactional
     public IngestResponse ingest(MultipartFile file, Long userId, Long teamId, String title) {
-        uploadPolicyService.checkUploadRateLimit(userId);
+        uploadPolicyService.checkUploadRateLimit(userId, KIND);
         String filename = file.getOriginalFilename() == null ? "document.bin" : file.getOriginalFilename();
         String ext = uploadPolicyService.validateKnowledgeUpload(filename, file.getSize());
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "03.validated",
+                "userId=" + userId
+                        + " ext=" + ext
+                        + " sizeBytes=" + file.getSize()
+                        + " filename=\"" + IngestFlowLog.preview(filename) + "\""));
 
         UUID documentId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
@@ -68,7 +77,7 @@ public class KnowledgeIngestService {
         String docTitle = (title == null || title.isBlank()) ? filename : title;
 
         try (InputStream in = file.getInputStream()) {
-            fileStorageService.uploadStream(objectKey, in, file.getSize(), mimeType);
+            fileStorageService.uploadStream(objectKey, in, file.getSize(), mimeType, KIND);
         } catch (BizException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -98,6 +107,15 @@ public class KnowledgeIngestService {
         job.setUpdatedAt(now);
         ingestJobMapper.insert(job);
 
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "05.db_pending",
+                "documentId=" + documentId
+                        + " jobId=" + jobId
+                        + " objectKey=" + objectKey
+                        + " title=\"" + IngestFlowLog.preview(docTitle) + "\""
+                        + " mimeType=" + mimeType));
+
         KnowledgeIngestEvent event = new KnowledgeIngestEvent();
         event.setEventId(UUID.randomUUID());
         event.setJobId(jobId);
@@ -116,10 +134,13 @@ public class KnowledgeIngestService {
             ingestJobMapper.updateById(job);
         } catch (RuntimeException ex) {
             markFailed(job, doc, "KAFKA_PUBLISH_FAILED");
+            log.warn(IngestFlowLog.msg(
+                    KIND,
+                    "08.kafka_fail",
+                    "documentId=" + documentId + " jobId=" + jobId + " error=\"KAFKA_PUBLISH_FAILED\""));
             throw new BizException(ErrorCode.INGEST_PUBLISH_FAILED);
         }
 
-        log.info("knowledge ingest created documentId={} jobId={} userId={}", documentId, jobId, userId);
         return new IngestResponse(documentId, jobId, JobStatus.PENDING.name());
     }
 
@@ -166,6 +187,10 @@ public class KnowledgeIngestService {
         doc.setErrorMessage(error);
         doc.setUpdatedAt(now);
         documentMapper.updateById(doc);
+        log.warn(IngestFlowLog.msg(
+                KIND,
+                "08.failed",
+                "documentId=" + doc.getId() + " jobId=" + job.getId() + " error=\"" + error + "\""));
     }
 
     private static String resolveMime(String ext, String contentType) {

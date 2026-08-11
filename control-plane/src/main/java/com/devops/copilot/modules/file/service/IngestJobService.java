@@ -7,8 +7,11 @@ import com.devops.copilot.modules.file.controller.dto.UpdateIngestJobRequest;
 import com.devops.copilot.modules.file.domain.entity.IngestJob;
 import com.devops.copilot.modules.file.domain.entity.KnowledgeDocument;
 import com.devops.copilot.modules.file.domain.enums.JobStatus;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
 import com.devops.copilot.modules.file.mapper.IngestJobMapper;
 import com.devops.copilot.modules.file.mapper.KnowledgeDocumentMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +23,9 @@ import java.util.UUID;
  */
 @Service
 public class IngestJobService {
+
+    private static final Logger log = LoggerFactory.getLogger(IngestJobService.class);
+    private static final String KIND = "knowledge";
 
     private final IngestJobMapper ingestJobMapper;
     private final KnowledgeDocumentMapper documentMapper;
@@ -36,9 +42,9 @@ public class IngestJobService {
     @Transactional
     public IngestJobResponse updateStatus(UUID jobId, UpdateIngestJobRequest req) {
         IngestJob job = requireJob(jobId);
+        String oldStatus = job.getStatus();
         if (req.getStatus() != null) {
             validateStatus(req.getStatus());
-            // 幂等：已 COMPLETED 的任务不允许回退到 PROCESSING（防重复消费乱序）
             if (JobStatus.COMPLETED.name().equals(job.getStatus())
                     && !JobStatus.COMPLETED.name().equals(req.getStatus())) {
                 return toResponse(job);
@@ -62,6 +68,32 @@ public class IngestJobService {
             doc.setUpdatedAt(OffsetDateTime.now());
             documentMapper.updateById(doc);
         }
+
+        if (req.getStatus() != null && !req.getStatus().equals(oldStatus)) {
+            log.info(IngestFlowLog.msg(
+                    KIND,
+                    "16.status_patch",
+                    "jobId=" + jobId
+                            + " documentId=" + job.getDocumentId()
+                            + " " + oldStatus + "→" + req.getStatus()
+                            + (req.getErrorMessage() != null
+                                    ? " error=\"" + IngestFlowLog.preview(req.getErrorMessage()) + "\""
+                                    : "")));
+            if (JobStatus.COMPLETED.name().equals(req.getStatus())) {
+                log.info(IngestFlowLog.msg(
+                        KIND,
+                        "17.end",
+                        "jobId=" + jobId + " documentId=" + job.getDocumentId() + " status=COMPLETED"));
+            } else if (JobStatus.FAILED.name().equals(req.getStatus())) {
+                log.warn(IngestFlowLog.msg(
+                        KIND,
+                        "17.end",
+                        "jobId=" + jobId
+                                + " documentId=" + job.getDocumentId()
+                                + " status=FAILED error=\"" + IngestFlowLog.preview(job.getErrorMessage()) + "\""));
+            }
+        }
+
         return toResponse(job);
     }
 

@@ -12,6 +12,7 @@ import com.devops.copilot.modules.file.domain.enums.AnalysisFileType;
 import com.devops.copilot.modules.file.domain.enums.JobStatus;
 import com.devops.copilot.modules.file.kafka.IngestEventProducer;
 import com.devops.copilot.modules.file.kafka.event.AnalysisIngestEvent;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
 import com.devops.copilot.modules.file.mapper.AnalysisJobMapper;
 import com.devops.copilot.modules.conversation.controller.dto.PageResponse;
 import org.slf4j.Logger;
@@ -32,6 +33,7 @@ import java.util.UUID;
 public class AnalysisJobService {
 
     private static final Logger log = LoggerFactory.getLogger(AnalysisJobService.class);
+    private static final String KIND = "analysis";
 
     private static final Map<String, AnalysisFileType> EXT_TO_TYPE = Map.of(
             "hprof", AnalysisFileType.HEAP_DUMP,
@@ -57,7 +59,7 @@ public class AnalysisJobService {
     @Transactional
     public AnalysisJobResponse create(
             MultipartFile file, Long userId, Long teamId, AnalysisFileType fileTypeOverride) {
-        uploadPolicyService.checkUploadRateLimit(userId);
+        uploadPolicyService.checkUploadRateLimit(userId, KIND);
         String filename = file.getOriginalFilename() == null ? "upload.bin" : file.getOriginalFilename();
         String ext = uploadPolicyService.validateAnalysisUpload(filename, file.getSize());
 
@@ -65,13 +67,21 @@ public class AnalysisJobService {
                 ? fileTypeOverride
                 : EXT_TO_TYPE.getOrDefault(ext, AnalysisFileType.APP_LOG);
 
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "03.validated",
+                "userId=" + userId
+                        + " ext=" + ext
+                        + " fileType=" + fileType.name()
+                        + " sizeBytes=" + file.getSize()
+                        + " filename=\"" + IngestFlowLog.preview(filename) + "\""));
+
         UUID jobId = UUID.randomUUID();
         String objectKey = "analysis/" + jobId + "/source." + ext;
         OffsetDateTime now = OffsetDateTime.now();
 
-        // 先 MinIO 后 DB：避免 DB 出现无文件脏记录（孤儿对象由 V1 sweeper 清理）
         try (InputStream in = file.getInputStream()) {
-            fileStorageService.uploadStream(objectKey, in, file.getSize(), file.getContentType());
+            fileStorageService.uploadStream(objectKey, in, file.getSize(), file.getContentType(), KIND);
         } catch (BizException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -88,6 +98,14 @@ public class AnalysisJobService {
         job.setCreatedAt(now);
         job.setUpdatedAt(now);
         analysisJobMapper.insert(job);
+
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "05.db_pending",
+                "jobId=" + jobId
+                        + " objectKey=" + objectKey
+                        + " fileType=" + fileType.name()
+                        + " status=PENDING"));
 
         AnalysisIngestEvent event = new AnalysisIngestEvent();
         event.setEventId(UUID.randomUUID());
@@ -106,10 +124,13 @@ public class AnalysisJobService {
             job.setErrorMessage("KAFKA_PUBLISH_FAILED");
             job.setUpdatedAt(OffsetDateTime.now());
             analysisJobMapper.updateById(job);
+            log.warn(IngestFlowLog.msg(
+                    KIND,
+                    "08.kafka_fail",
+                    "jobId=" + jobId + " error=\"KAFKA_PUBLISH_FAILED\""));
             throw new BizException(ErrorCode.INGEST_PUBLISH_FAILED);
         }
 
-        log.info("analysis job created jobId={} userId={} fileType={}", jobId, userId, fileType);
         return toResponse(job);
     }
 
@@ -156,12 +177,12 @@ public class AnalysisJobService {
         if (job == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "分析任务不存在");
         }
+        String oldStatus = job.getStatus();
         if (req.getStatus() != null) {
             validateStatus(req.getStatus());
             job.setStatus(req.getStatus());
         }
         if (req.getResultSummary() != null) {
-            // summary 上限 2KB：防止 Worker 把整文件塞进列
             String summary = req.getResultSummary();
             if (summary.length() > 2048) {
                 summary = summary.substring(0, 2048);
@@ -179,6 +200,34 @@ public class AnalysisJobService {
         }
         job.setUpdatedAt(OffsetDateTime.now());
         analysisJobMapper.updateById(job);
+
+        if (req.getStatus() != null && !req.getStatus().equals(oldStatus)) {
+            log.info(IngestFlowLog.msg(
+                    KIND,
+                    "16.status_patch",
+                    "jobId=" + jobId
+                            + " " + oldStatus + "→" + req.getStatus()
+                            + (req.getResultSummary() != null
+                                    ? " summary=\"" + IngestFlowLog.preview(req.getResultSummary()) + "\""
+                                    : "")
+                            + (req.getErrorMessage() != null
+                                    ? " error=\"" + IngestFlowLog.preview(req.getErrorMessage()) + "\""
+                                    : "")));
+            if (JobStatus.COMPLETED.name().equals(req.getStatus())) {
+                log.info(IngestFlowLog.msg(
+                        KIND,
+                        "17.end",
+                        "jobId=" + jobId
+                                + " status=COMPLETED"
+                                + " summary=\"" + IngestFlowLog.preview(job.getResultSummary()) + "\""));
+            } else if (JobStatus.FAILED.name().equals(req.getStatus())) {
+                log.warn(IngestFlowLog.msg(
+                        KIND,
+                        "17.end",
+                        "jobId=" + jobId + " status=FAILED error=\"" + IngestFlowLog.preview(job.getErrorMessage()) + "\""));
+            }
+        }
+
         return toResponse(job);
     }
 

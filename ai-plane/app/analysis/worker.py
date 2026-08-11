@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from pathlib import Path
 
 from app.analysis.models.analysis_ingest_event import AnalysisIngestEvent
@@ -14,32 +15,86 @@ from app.analysis.parser.text_sampler import sample_text
 from app.clients import java_internal_client as _jic_mod
 from app.clients import minio_client
 from app.config import settings
+from app.observability.logging import ingest_msg, preview
 
 logger = logging.getLogger(__name__)
+_KIND = "analysis"
 
 
 async def handle_analysis_ingest(event: AnalysisIngestEvent, *, retry_count: int = 0) -> None:
-    """处理单条分析事件（幂等：COMPLETED/PROCESSING 跳过）。"""
+    """处理单条分析事件（幂等：COMPLETED 跳过）。"""
+    trace = event.trace_id or ""
     java = _jic_mod.java_internal_client
     job = await java.get_analysis_job(event.job_id)
     status = job.get("status")
-    # 仅跳过 COMPLETED：PROCESSING 允许崩溃恢复重入（至少一次投递）
     if status == "COMPLETED":
-        logger.info("analysis skip duplicate job_id=%s status=%s", event.job_id, status)
+        logger.info(
+            ingest_msg(
+                _KIND,
+                "10.skip",
+                f"jobId={event.job_id} reason=already_completed",
+            ),
+            extra={"trace_id": trace},
+        )
         return
+
+    logger.info(
+        ingest_msg(
+            _KIND,
+            "11.process_start",
+            f"jobId={event.job_id} objectKey={event.object_key} "
+            f"fileType={event.file_type} retry={retry_count} prevStatus={status}",
+        ),
+        extra={"trace_id": trace},
+    )
 
     await java.patch_analysis_job(event.job_id, status="PROCESSING")
     tmp: Path | None = None
+    started = time.perf_counter()
     try:
         tmp = await asyncio.to_thread(minio_client.download_to_temp, event.object_key)
+        logger.info(
+            ingest_msg(
+                _KIND,
+                "12.download",
+                f"jobId={event.job_id} objectKey={event.object_key} tmp={tmp}",
+            ),
+            extra={"trace_id": trace},
+        )
+
         text = await asyncio.to_thread(sample_text, tmp, settings.analysis_sample_bytes)
+        logger.info(
+            ingest_msg(
+                _KIND,
+                "13.sample",
+                f"jobId={event.job_id} sampleChars={len(text)} preview=\"{preview(text)}\"",
+            ),
+            extra={"trace_id": trace},
+        )
+
         parsed = analyze_text_sample(text, event.file_type)
         summary = build_summary(parsed)
+        logger.info(
+            ingest_msg(
+                _KIND,
+                "14.analyze",
+                f"jobId={event.job_id} fileType={event.file_type} "
+                f"summaryLen={len(summary)} summary=\"{preview(summary)}\"",
+            ),
+            extra={"trace_id": trace},
+        )
 
-        # 可选详情写 MinIO，摘要进 DB（≤2KB 由 Java 侧截断）
         result_key = f"analysis/{event.job_id}/result.json"
         payload = json.dumps(parsed, ensure_ascii=False).encode("utf-8")
         await asyncio.to_thread(minio_client.upload_bytes, result_key, payload)
+        logger.info(
+            ingest_msg(
+                _KIND,
+                "15.result_saved",
+                f"jobId={event.job_id} resultKey={result_key} bytes={len(payload)}",
+            ),
+            extra={"trace_id": trace},
+        )
 
         await java.patch_analysis_job(
             event.job_id,
@@ -47,14 +102,27 @@ async def handle_analysis_ingest(event: AnalysisIngestEvent, *, retry_count: int
             result_summary=summary,
             result_object_key=result_key,
         )
+        duration_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
-            "analysis completed job_id=%s file_type=%s summary_len=%d",
-            event.job_id,
-            event.file_type,
-            len(summary),
+            ingest_msg(
+                _KIND,
+                "17.end",
+                f"jobId={event.job_id} status=COMPLETED durationMs={duration_ms} "
+                f"summary=\"{preview(summary)}\"",
+            ),
+            extra={"trace_id": trace},
         )
     except Exception as ex:
-        logger.exception("analysis failed job_id=%s", event.job_id)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        logger.exception(
+            ingest_msg(
+                _KIND,
+                "17.end",
+                f"jobId={event.job_id} status=FAILED durationMs={duration_ms} "
+                f"error=\"{preview(str(ex))}\"",
+            ),
+            extra={"trace_id": trace},
+        )
         await java.patch_analysis_job(
             event.job_id,
             status="FAILED",
@@ -63,7 +131,6 @@ async def handle_analysis_ingest(event: AnalysisIngestEvent, *, retry_count: int
         )
         raise
     finally:
-        # 清理临时文件：忽略并发删除 / 权限等 OSError，避免掩盖业务异常
         if tmp is not None:
             with contextlib.suppress(OSError):
                 tmp.unlink(missing_ok=True)

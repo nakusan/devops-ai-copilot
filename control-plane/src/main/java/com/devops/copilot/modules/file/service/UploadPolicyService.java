@@ -3,6 +3,9 @@ package com.devops.copilot.modules.file.service;
 import com.devops.copilot.common.exception.BizException;
 import com.devops.copilot.common.exception.ErrorCode;
 import com.devops.copilot.modules.file.config.FileProperties;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -20,6 +23,8 @@ import java.util.stream.Collectors;
 @Service
 public class UploadPolicyService {
 
+    private static final Logger log = LoggerFactory.getLogger(UploadPolicyService.class);
+
     private final FileProperties fileProperties;
     private final StringRedisTemplate redisTemplate;
 
@@ -29,6 +34,10 @@ public class UploadPolicyService {
     }
 
     public void checkUploadRateLimit(Long userId) {
+        checkUploadRateLimit(userId, "file");
+    }
+
+    public void checkUploadRateLimit(Long userId, String kind) {
         String key = "ratelimit:upload:user:" + userId;
         Long count = redisTemplate.opsForValue().increment(key);
         if (count != null && count == 1L) {
@@ -36,8 +45,16 @@ public class UploadPolicyService {
         }
         int limit = fileProperties.getUploadRateLimitPerHour();
         if (count != null && count > limit) {
+            log.warn(IngestFlowLog.msg(
+                    kind,
+                    "02.rate_limit",
+                    "userId=" + userId + " count=" + count + " limit=" + limit + " status=exceeded"));
             throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，每小时最多 " + limit + " 次");
         }
+        log.info(IngestFlowLog.msg(
+                kind,
+                "02.rate_limit",
+                "userId=" + userId + " count=" + count + " limit=" + limit + " status=ok"));
     }
 
     public String validateKnowledgeUpload(String filename, long size) {

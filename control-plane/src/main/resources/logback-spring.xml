@@ -30,6 +30,7 @@
             <appender-ref ref="CONSOLE"/>
         </root>
         <logger name="com.devops.copilot.modules.conversation" level="INFO"/>
+        <logger name="com.devops.copilot.modules.file" level="INFO"/>
     </springProfile>
 
     <springProfile name="json">

@@ -4,6 +4,7 @@ import com.devops.copilot.common.exception.BizException;
 import com.devops.copilot.common.exception.ErrorCode;
 import com.devops.copilot.modules.file.controller.dto.ChunkBatchRequest;
 import com.devops.copilot.modules.file.controller.dto.ChunkItemDto;
+import com.devops.copilot.modules.file.logging.IngestFlowLog;
 import com.devops.copilot.modules.file.mapper.KnowledgeChunkMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +25,7 @@ import java.util.stream.Collectors;
 public class KnowledgeChunkService {
 
     private static final Logger log = LoggerFactory.getLogger(KnowledgeChunkService.class);
+    private static final String KIND = "knowledge";
 
     private final KnowledgeChunkMapper chunkMapper;
     private final KnowledgeIngestService knowledgeIngestService;
@@ -74,7 +76,10 @@ public class KnowledgeChunkService {
                     metadataJson);
             inserted++;
         }
-        log.info("chunks batch inserted documentId={} count={}", documentId, inserted);
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "15.chunks_saved",
+                "documentId=" + documentId + " inserted=" + inserted));
         return inserted;
     }
 

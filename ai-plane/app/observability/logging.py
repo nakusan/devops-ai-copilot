@@ -59,6 +59,11 @@ def chat_msg(step: str, details: str) -> str:
     return f"[CHAT] step={step} {details}"
 
 
+def ingest_msg(kind: str, step: str, details: str) -> str:
+    """异步文件链路：kind=knowledge|analysis。"""
+    return f"[INGEST] step={step} kind={kind} {details}"
+
+
 class ReadableFormatter(logging.Formatter):
     """一行一条，东八区时间，方便 docker logs 肉眼看。"""
 
