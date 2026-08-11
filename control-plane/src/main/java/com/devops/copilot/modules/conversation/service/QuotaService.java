@@ -47,8 +47,21 @@ public class QuotaService {
         long limit = resolveDailyLimit(teamId);
         long used = currentUsage(teamId);
         if (used + estimatedTokens > limit) {
+            log.warn(
+                    "[CHAT] step=02.配额校验 status=exceeded teamId={} used={} estimate={} limit={}",
+                    teamId,
+                    used,
+                    estimatedTokens,
+                    limit);
             throw new BizException(ErrorCode.QUOTA_EXCEEDED);
         }
+        log.info(
+                "[CHAT] step=02.配额校验 status=ok teamId={} used={} estimate={} limit={} remain={}",
+                teamId,
+                used,
+                estimatedTokens,
+                limit,
+                limit - used);
     }
 
     /**
@@ -64,7 +77,7 @@ public class QuotaService {
         if (after != null && after.equals(actualTokens)) {
             redisTemplate.expire(key, keyTtl);
         }
-        log.debug("配额累加 teamId={} delta={} after={}", teamId, actualTokens, after);
+        log.info("[CHAT] step=07.配额累加 teamId={} delta={} after={}", teamId, actualTokens, after);
     }
 
     public long currentUsage(Long teamId) {

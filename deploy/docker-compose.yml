@@ -133,8 +133,9 @@ services:
       AI_PLANE_BASE_URL: http://ai-plane:8000
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-to-a-long-random-secret-key}
       SERVICE_TOKEN_SECRET: ${SERVICE_TOKEN_SECRET:-dev-only-service-token-secret-change-me}
-      # 容器日志走 JSON，便于集中采集（本机开发可不设）
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-json}
+      # 本地默认可读文本日志；需要 JSON 时：SPRING_PROFILES_ACTIVE=json
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+      TZ: Asia/Shanghai
     depends_on:
       postgres:
         condition: service_healthy
@@ -173,6 +174,8 @@ services:
       CHAT_BACKEND: orchestrator
       MCP_ENABLED: "true"
       OTEL_SERVICE_NAME: ai-plane
+      TZ: Asia/Shanghai
+      LOG_FORMAT: ${LOG_FORMAT:-text}
     depends_on:
       postgres:
         condition: service_healthy
@@ -208,6 +211,8 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       WORKER_ROLES: knowledge,analysis
       OTEL_SERVICE_NAME: ai-plane
+      TZ: Asia/Shanghai
+      LOG_FORMAT: ${LOG_FORMAT:-text}
     depends_on:
       postgres:
         condition: service_healthy
@@ -249,7 +254,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "3600:3000"
+      - "23000:3000"
     volumes:
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro

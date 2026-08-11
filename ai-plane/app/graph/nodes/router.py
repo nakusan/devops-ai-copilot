@@ -1,9 +1,13 @@
 """RouterNode — 规则优先的意图分类（6.5 §3.5.1）。"""
 
+import logging
 import re
 from typing import Any
 
 from app.graph.state import DiagnosisState
+from app.observability.logging import chat_msg, preview
+
+logger = logging.getLogger(__name__)
 
 # RAG：内部知识 / 错误码 / 原因排查
 RAG_PATTERNS = [
@@ -66,6 +70,15 @@ def router_node(state: DiagnosisState) -> dict[str, Any]:
     else:
         intent = "direct"
 
+    logger.info(
+        chat_msg(
+            "11.router",
+            f"intent={intent} ragHit={rag_hit} toolHit={tool_hit} "
+            f"enableRag={enable_rag} enableMcp={enable_mcp} "
+            f"user=\"{preview(msg)}\"",
+        ),
+        extra={"trace_id": state.get("trace_id") or ""},
+    )
     # TODO(Phase-5/V1.1): LLM intent 分类 — MVP 规则优先省成本 — 规则未命中时调小模型
     return {"intent": intent}
 

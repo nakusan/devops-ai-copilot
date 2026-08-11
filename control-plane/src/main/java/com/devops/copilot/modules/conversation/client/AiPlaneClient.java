@@ -6,6 +6,7 @@ import com.devops.copilot.common.trace.TraceIds;
 import com.devops.copilot.modules.conversation.client.dto.CancelChatRequest;
 import com.devops.copilot.modules.conversation.client.dto.InternalChatRequest;
 import com.devops.copilot.modules.conversation.client.dto.StreamEvent;
+import com.devops.copilot.modules.conversation.logging.ChatFlowLog;
 import com.devops.copilot.modules.security.jwt.ServiceTokenProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -49,11 +50,19 @@ public class AiPlaneClient {
     public Flux<StreamEvent> streamChat(InternalChatRequest request) {
         String token = serviceTokenProvider.issue();
         String traceId = request.getTraceId() != null ? request.getTraceId() : TraceIds.current();
-        // 出站 parent spanId：优先用当前请求 MDC；缺失时现生成，避免写死常量导致排障无法区分
         String spanId = TraceIds.currentSpanId();
         if (spanId == null || spanId.isBlank() || spanId.length() != 16) {
             spanId = TraceIds.newSpanId();
         }
+
+        int historyCount = request.getHistory() == null ? 0 : request.getHistory().size();
+        String model = request.getAgentConfig() != null ? request.getAgentConfig().getModel() : null;
+        log.info(ChatFlowLog.msg(
+                "05.出站HTTP",
+                "sessionId=" + request.getSessionId()
+                        + " model=" + model
+                        + " historyCount=" + historyCount
+                        + " user=\"" + ChatFlowLog.preview(request.getUserMessage()) + "\""));
 
         return aiPlaneWebClient.post()
                 .uri("/internal/v1/chat/stream")
@@ -67,11 +76,15 @@ public class AiPlaneClient {
                 .bodyToFlux(String.class)
                 .filter(line -> line != null && !line.isBlank())
                 .map(this::parseLine)
-                .doOnError(err -> log.warn("AI Plane 流式调用失败: {}", err.toString()));
+                .doOnError(err -> log.warn(ChatFlowLog.msg(
+                        "05.出站HTTP失败",
+                        "sessionId=" + request.getSessionId()
+                                + " error=\"" + ChatFlowLog.preview(err.toString()) + "\"")));
     }
 
     public void cancel(String sessionId, String traceId) {
         try {
+            log.info(ChatFlowLog.msg("08.取消上游", "sessionId=" + sessionId));
             aiPlaneWebClient.post()
                     .uri("/internal/v1/chat/cancel")
                     .contentType(MediaType.APPLICATION_JSON)
@@ -81,8 +94,9 @@ public class AiPlaneClient {
                     .toBodilessEntity()
                     .block();
         } catch (Exception ex) {
-            // 取消是尽力而为：Python 侧流可能已结束
-            log.debug("取消 AI Plane 生成失败（可忽略）: {}", ex.toString());
+            log.debug(ChatFlowLog.msg(
+                    "08.取消上游失败",
+                    "sessionId=" + sessionId + " error=\"" + ChatFlowLog.preview(ex.toString()) + "\""));
         }
     }
 

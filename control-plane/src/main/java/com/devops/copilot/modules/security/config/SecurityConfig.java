@@ -67,7 +67,9 @@ public class SecurityConfig {
                                 "/actuator/info",
                                 // MVP：Prometheus 抓取内网免鉴权；生产应收口到内网 + auth（6.7 §5）
                                 "/actuator/prometheus",
-                                "/actuator/metrics")
+                                "/actuator/metrics",
+                                // SSE/异步收尾若仍冒泡异常，Tomcat 会进 /error；须放行避免连锁 AccessDenied
+                                "/error")
                         .permitAll()
                         // internal 由 ServiceTokenFilter 校验，此处仍要求 authenticated
                         // 但 Service Token 不会设置 Authentication —— 改为 permitAll + Filter 把关

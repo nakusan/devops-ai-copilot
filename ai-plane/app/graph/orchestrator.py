@@ -11,6 +11,7 @@ from app.graph.models.internal_chat_request import InternalChatRequest
 from app.graph.models.stream_event import StreamEvent, done_event, error_event
 from app.graph.state import DiagnosisState, init_state_from_request
 from app.graph.streaming.event_emitter import build_done_payload, citation_event
+from app.observability.logging import chat_msg, preview
 from app.observability.metrics import CHAT_STREAM_DURATION
 from app.observability.otel import get_tracer
 
@@ -31,20 +32,39 @@ async def run_diagnosis_stream(
         if req.trace_id:
             span.set_attribute("copilot.trace_id", req.trace_id)
         try:
+            logger.info(
+                chat_msg(
+                    "11.graph_start",
+                    f"sessionId={req.session_id} "
+                    f"user=\"{preview(req.user_message)}\"",
+                ),
+                extra={"trace_id": req.trace_id or "", "event": "chat.stream.graph_start"},
+            )
             graph = get_diagnosis_graph()
             state = await graph.ainvoke(state)  # type: ignore[assignment]
 
             intent = state.get("intent") or "direct"
+            citations = state.get("citations") or []
+            chunks = state.get("retrieved_chunks") or []
+            tool_calls = state.get("tool_calls") or []
+            analysis_summary = state.get("analysis_summary")
+            llm_messages = state.get("llm_messages") or []
             span.set_attribute("intent", intent)
+
+            analysis_preview = preview(str(analysis_summary) if analysis_summary else "")
             logger.info(
-                "diagnosis graph done trace_id=%s session_id=%s intent=%s",
-                req.trace_id,
-                req.session_id,
-                intent,
+                chat_msg(
+                    "12.graph_done",
+                    f"sessionId={req.session_id} intent={intent} "
+                    f"citations={len(citations)} chunks={len(chunks)} "
+                    f"toolCalls={len(tool_calls)} "
+                    f"hasAnalysis={bool(analysis_summary)} "
+                    f"llmMessages={len(llm_messages)} "
+                    f"analysisPreview=\"{analysis_preview}\"",
+                ),
                 extra={"trace_id": req.trace_id or "", "event": "chat.stream.graph_done"},
             )
 
-            citations = state.get("citations") or []
             if citations:
                 yield citation_event(citations)
 
@@ -53,8 +73,17 @@ async def run_diagnosis_stream(
                 return
 
             cfg = req.agent_config
-            messages = state.get("llm_messages") or []
+            messages = llm_messages
             had_error = False
+
+            logger.info(
+                chat_msg(
+                    "13.llm_start",
+                    f"sessionId={req.session_id} model={cfg.model} "
+                    f"temp={cfg.temperature} msgCount={len(messages)}",
+                ),
+                extra={"trace_id": req.trace_id or ""},
+            )
 
             async for evt in stream_chat(
                 messages,
@@ -76,7 +105,6 @@ async def run_diagnosis_stream(
                 usage = {"promptTokens": 0, "completionTokens": 0, "totalTokens": 0}
 
             latency_ms = int((time.perf_counter() - started) * 1000)
-            tool_calls = state.get("tool_calls") or []
             yield done_event(
                 build_done_payload(
                     intent=intent,
@@ -88,18 +116,21 @@ async def run_diagnosis_stream(
                 )
             )
             logger.info(
-                "event=chat.stream.end durationMs=%s intent=%s",
-                latency_ms,
-                intent,
+                chat_msg(
+                    "15.done",
+                    f"sessionId={req.session_id} durationMs={latency_ms} "
+                    f"intent={intent} usage={usage}",
+                ),
                 extra={"trace_id": req.trace_id or "", "event": "chat.stream.end"},
             )
         except asyncio.CancelledError:
             yield error_event("CANCELLED", "生成已取消")
         except Exception as ex:  # noqa: BLE001
             logger.exception(
-                "diagnosis failed trace_id=%s session_id=%s",
-                req.trace_id,
-                req.session_id,
+                chat_msg(
+                    "15.error",
+                    f"sessionId={req.session_id} error=\"{preview(str(ex))}\"",
+                ),
                 extra={"trace_id": req.trace_id or ""},
             )
             yield error_event("AGENT_ERROR", str(ex))

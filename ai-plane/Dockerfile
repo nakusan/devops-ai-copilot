@@ -38,7 +38,7 @@ FROM python:3.12-slim-bookworm AS runtime
 
 # curl：可选探活；MCP stdio Mock 只需 python 本进程
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app && useradd --system --gid app --home /app app
 

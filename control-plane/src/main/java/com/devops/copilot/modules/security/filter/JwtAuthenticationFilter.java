@@ -23,6 +23,9 @@ import java.io.IOException;
  * 用户 JWT 校验 Filter。
  *
  * <p>公开路径与 /internal/** 跳过：前者无需登录，后者走 ServiceTokenFilter。
+ *
+ * <p>SSE（SseEmitter）结束时 Tomcat 会做 async dispatch；OncePerRequestFilter 默认跳过异步派发，
+ * 会导致 SecurityContext 丢失并触发误报 AccessDenied。因此本 Filter 在 async/error dispatch 也执行。
  */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -41,6 +44,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return path.startsWith("/internal/")
                 || path.startsWith("/actuator/")
                 || path.startsWith("/api/v1/auth/");
+    }
+
+    /** SSE complete 等异步收尾时也要恢复 JWT，避免匿名 AccessDenied。 */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
+    /** 错误页派发时同样尝试恢复身份，减少 /error 连锁鉴权失败。 */
+    @Override
+    protected boolean shouldNotFilterErrorDispatch() {
+        return false;
     }
 
     @Override
@@ -63,6 +78,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
         } catch (BizException ex) {
             SecurityContextHolder.clearContext();
+            // SSE 已写出时响应已 committed，无法再写 401；继续链以免二次破坏连接
+            if (response.isCommitted()) {
+                filterChain.doFilter(request, response);
+                return;
+            }
             writeError(response, ex.getErrorCode(), ex.getMessage());
         }
     }

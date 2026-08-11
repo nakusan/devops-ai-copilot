@@ -29,6 +29,10 @@ export async function fetchSession(id) {
   return api(`/sessions/${id}`);
 }
 
+export function isSessionArchived(session) {
+  return session?.status === 'ARCHIVED';
+}
+
 export function groupSessionsByDate(sessions) {
   const groups = new Map();
   const now = new Date();
@@ -57,6 +61,53 @@ export function groupSessionsByDate(sessions) {
   return groups;
 }
 
+function appendSessionItem(container, session, currentId, { onSelect, onDelete }) {
+  const item = document.createElement('div');
+  const archived = isSessionArchived(session);
+  item.className =
+    'session-item' +
+    (session.id === currentId ? ' active' : '') +
+    (archived ? ' session-item-archived' : '');
+  item.dataset.id = session.id;
+  item.dataset.status = session.status || 'ACTIVE';
+
+  const title = document.createElement('span');
+  title.className = 'session-item-title';
+  title.textContent = session.title || DEFAULT_TITLE;
+
+  item.appendChild(title);
+
+  if (!archived) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'session-item-delete';
+    delBtn.type = 'button';
+    delBtn.textContent = '×';
+    delBtn.title = '归档';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onDelete(session.id);
+    });
+    item.appendChild(delBtn);
+  }
+
+  item.addEventListener('click', () => onSelect(session.id));
+  container.appendChild(item);
+}
+
+function appendDateGroups(container, sessions, currentId, handlers) {
+  const groups = groupSessionsByDate(sessions);
+  for (const [label, items] of groups) {
+    const groupLabel = document.createElement('div');
+    groupLabel.className = 'session-group-label';
+    groupLabel.textContent = label;
+    container.appendChild(groupLabel);
+
+    for (const session of items) {
+      appendSessionItem(container, session, currentId, handlers);
+    }
+  }
+}
+
 export function renderSessionList(sessions, currentId, { onSelect, onDelete }) {
   const container = document.getElementById('session-list');
   container.innerHTML = '';
@@ -66,38 +117,34 @@ export function renderSessionList(sessions, currentId, { onSelect, onDelete }) {
     return;
   }
 
-  const groups = groupSessionsByDate(sessions);
+  const active = sessions.filter((s) => !isSessionArchived(s));
+  const archived = sessions.filter(isSessionArchived);
 
-  for (const [label, items] of groups) {
-    const groupLabel = document.createElement('div');
-    groupLabel.className = 'session-group-label';
-    groupLabel.textContent = label;
-    container.appendChild(groupLabel);
+  const activePane = document.createElement('div');
+  activePane.className = 'session-list-active';
+  if (active.length) {
+    appendDateGroups(activePane, active, currentId, { onSelect, onDelete });
+  } else {
+    activePane.innerHTML = '<p class="empty-list">暂无对话</p>';
+  }
+  container.appendChild(activePane);
 
-    for (const session of items) {
-      const item = document.createElement('div');
-      item.className = 'session-item' + (session.id === currentId ? ' active' : '');
-      item.dataset.id = session.id;
+  if (archived.length) {
+    const archivedPane = document.createElement('div');
+    archivedPane.className = 'session-list-archived';
 
-      const title = document.createElement('span');
-      title.className = 'session-item-title';
-      title.textContent = session.title || DEFAULT_TITLE;
+    const archivedLabel = document.createElement('div');
+    archivedLabel.className = 'session-group-label session-archived-label';
+    archivedLabel.textContent = '已归档';
+    archivedPane.appendChild(archivedLabel);
 
-      const delBtn = document.createElement('button');
-      delBtn.className = 'session-item-delete';
-      delBtn.type = 'button';
-      delBtn.textContent = '×';
-      delBtn.title = '删除';
-      delBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onDelete(session.id);
-      });
-
-      item.appendChild(title);
-      item.appendChild(delBtn);
-      item.addEventListener('click', () => onSelect(session.id));
-      container.appendChild(item);
+    const sortedArchived = [...archived].sort(
+      (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt),
+    );
+    for (const session of sortedArchived) {
+      appendSessionItem(archivedPane, session, currentId, { onSelect, onDelete });
     }
+    container.appendChild(archivedPane);
   }
 }
 

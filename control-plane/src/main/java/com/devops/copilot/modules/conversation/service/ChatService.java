@@ -12,6 +12,7 @@ import com.devops.copilot.modules.conversation.controller.dto.ChatRequest;
 import com.devops.copilot.modules.conversation.domain.entity.Message;
 import com.devops.copilot.modules.conversation.domain.entity.SessionEntity;
 import com.devops.copilot.modules.conversation.domain.enums.MessageRole;
+import com.devops.copilot.modules.conversation.logging.ChatFlowLog;
 import com.devops.copilot.modules.conversation.mapper.MessageMapper;
 import com.devops.copilot.modules.conversation.sse.SseStreamBridge;
 import com.devops.copilot.modules.security.domain.UserPrincipal;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -82,17 +84,35 @@ public class ChatService {
     public void streamChat(
             UUID sessionId, ChatRequest req, UserPrincipal principal, SseEmitter emitter) {
         SessionEntity session = sessionService.requireOwnedSession(sessionId, principal.getUserId(), false);
+        log.info(ChatFlowLog.msg(
+                "01.会话信息获取",
+                "sessionId=" + sessionId
+                        + " agentId=" + session.getAgentId()
+                        + " title=\"" + ChatFlowLog.preview(session.getTitle()) + "\""));
 
         long estimate = Math.max(1, req.getContent().length() / Math.max(1, chatProperties.getEstimateCharsPerToken()));
         quotaService.assertWithinQuota(principal.getTeamId(), estimate);
 
         MessageService.SaveUserResult saved = messageService.saveUserMessage(sessionId, req);
         touchSession(session);
+        log.info(ChatFlowLog.msg(
+                "03.用户消息保存",
+                "messageId=" + saved.message().getId()
+                        + " created=" + saved.created()
+                        + " clientMessageId=" + saved.message().getClientMessageId()
+                        + " chars=" + (saved.message().getContent() == null ? 0 : saved.message().getContent().length())
+                        + " content=\"" + ChatFlowLog.preview(saved.message().getContent()) + "\""));
 
         // 幂等：已有完整 assistant 则直接回放 done，避免重复烧模型/Mock
         if (!saved.created()) {
             Message assistant = findAssistantAfter(sessionId, saved.message().getCreatedAt());
             if (assistant != null) {
+                log.info(ChatFlowLog.msg(
+                        "03.幂等回放",
+                        "sessionId=" + sessionId
+                                + " userMessageId=" + saved.message().getId()
+                                + " assistantMessageId=" + assistant.getId()
+                                + " chars=" + (assistant.getContent() == null ? 0 : assistant.getContent().length())));
                 sseBridge.send(emitter, "done", Map.of(
                         "messageId", assistant.getId().toString(),
                         "idempotent", true,
@@ -111,6 +131,15 @@ public class ChatService {
         List<InternalChatRequest.ChatMessageDto> history =
                 messageService.loadHistory(sessionId, historyLimit, saved.message().getId());
 
+        log.info(ChatFlowLog.msg(
+                "04.准备上下文",
+                "agentId=" + session.getAgentId()
+                        + " model=" + agentConfig.getModel()
+                        + " enableRag=" + agentConfig.isEnableRag()
+                        + " enableMcp=" + agentConfig.isEnableMcp()
+                        + " historyCount=" + history.size()
+                        + " historyLimit=" + historyLimit));
+
         InternalChatRequest internal = new InternalChatRequest();
         internal.setTraceId(TraceIds.current());
         internal.setSessionId(sessionId.toString());
@@ -122,19 +151,20 @@ public class ChatService {
         StringBuilder buffer = new StringBuilder();
         AtomicReference<JsonNode> doneRef = new AtomicReference<>();
         AtomicBoolean finished = new AtomicBoolean(false);
+        AtomicInteger tokenEvents = new AtomicInteger(0);
         long startedAt = System.currentTimeMillis();
         AtomicLong startedAtRef = new AtomicLong(startedAt);
         chatMetrics.recordStart();
-        log.info(
-                "event=chat.stream.start sessionId={} traceId={}",
-                sessionId,
-                TraceIds.current());
+        log.info(ChatFlowLog.msg(
+                "05.调用AI模型",
+                "sessionId=" + sessionId
+                        + " historyCount=" + history.size()
+                        + " userChars=" + req.getContent().length()));
 
-        // 在弹性线程订阅，避免阻塞 Tomcat 请求线程过久（SseEmitter 已返回）
         Disposable subscription = aiPlaneClient.streamChat(internal)
                 .publishOn(Schedulers.boundedElastic())
                 .subscribe(
-                        evt -> onEvent(emitter, buffer, doneRef, finished, startedAtRef, evt),
+                        evt -> onEvent(emitter, buffer, doneRef, finished, startedAtRef, tokenEvents, evt),
                         err -> onError(emitter, sessionId, finished, startedAtRef, err),
                         () -> onComplete(
                                 emitter,
@@ -143,10 +173,12 @@ public class ChatService {
                                 buffer,
                                 doneRef,
                                 finished,
-                                startedAtRef));
+                                startedAtRef,
+                                tokenEvents));
 
         emitter.onCompletion(() -> cleanup(subscription, sessionId, finished));
         emitter.onTimeout(() -> {
+            log.warn(ChatFlowLog.msg("08.SSE超时", "sessionId=" + sessionId));
             cleanup(subscription, sessionId, finished);
             emitter.complete();
         });
@@ -159,17 +191,44 @@ public class ChatService {
             AtomicReference<JsonNode> doneRef,
             AtomicBoolean finished,
             AtomicLong startedAtRef,
+            AtomicInteger tokenEvents,
             StreamEvent evt) {
         try {
             switch (evt.getType()) {
                 case "token" -> {
                     if (evt.getText() != null) {
                         buffer.append(evt.getText());
+                        int n = tokenEvents.incrementAndGet();
+                        // 首个 token + 每 20 个打一次，避免刷屏
+                        if (n == 1 || n % 20 == 0) {
+                            log.info(ChatFlowLog.msg(
+                                    "06.接收Token",
+                                    "n=" + n
+                                            + " bufChars=" + buffer.length()
+                                            + " chunk=\"" + ChatFlowLog.preview(evt.getText()) + "\""));
+                        }
                         sseBridge.send(emitter, "token", Map.of("text", evt.getText()));
                     }
                 }
-                case "citation" -> sseBridge.send(emitter, "citation", evt.getData());
-                case "done" -> doneRef.set(evt.getDone());
+                case "citation" -> {
+                    JsonNode data = evt.getData();
+                    int chunkCount = 0;
+                    if (data != null && data.has("citations") && data.get("citations").isArray()) {
+                        chunkCount = data.get("citations").size();
+                    } else if (data != null && data.has("chunks") && data.get("chunks").isArray()) {
+                        chunkCount = data.get("chunks").size();
+                    }
+                    log.info(ChatFlowLog.msg(
+                            "06.接收引用",
+                            "chunks=" + chunkCount + " data=" + ChatFlowLog.preview(String.valueOf(data))));
+                    sseBridge.send(emitter, "citation", evt.getData());
+                }
+                case "done" -> {
+                    doneRef.set(evt.getDone());
+                    log.info(ChatFlowLog.msg(
+                            "06.上游完成",
+                            "payload=" + ChatFlowLog.preview(String.valueOf(evt.getDone()))));
+                }
                 case "error" -> {
                     if (!finished.compareAndSet(false, true)) {
                         return;
@@ -182,17 +241,18 @@ public class ChatService {
                             : "上游生成失败";
                     long durationMs = System.currentTimeMillis() - startedAtRef.get();
                     chatMetrics.recordError(code, durationMs);
-                    log.warn(
-                            "event=chat.stream.end status=error code={} durationMs={} traceId={}",
-                            code,
-                            durationMs,
-                            TraceIds.current());
+                    log.warn(ChatFlowLog.msg(
+                            "08.结束",
+                            "status=error code=" + code
+                                    + " message=\"" + ChatFlowLog.preview(message) + "\""
+                                    + " durationMs=" + durationMs
+                                    + " tokenEvents=" + tokenEvents.get()
+                                    + " bufChars=" + buffer.length()));
                     sseBridge.sendError(emitter, code, message);
                 }
-                default -> log.debug("忽略未知流事件 type={}", evt.getType());
+                default -> log.debug(ChatFlowLog.msg("06.未知事件", "type=" + evt.getType()));
             }
         } catch (SseStreamBridge.SseBrokenException broken) {
-            // 客户端断开：停止处理后续事件（subscription 会在 onCompletion 清理）
             throw broken;
         }
     }
@@ -204,7 +264,8 @@ public class ChatService {
             StringBuilder buffer,
             AtomicReference<JsonNode> doneRef,
             AtomicBoolean finished,
-            AtomicLong startedAtRef) {
+            AtomicLong startedAtRef,
+            AtomicInteger tokenEvents) {
         if (!finished.compareAndSet(false, true)) {
             return;
         }
@@ -225,21 +286,28 @@ public class ChatService {
                 quotaService.increaseUsage(teamId, usageTotal);
             }
             chatMetrics.recordSuccess(durationMs);
-            log.info(
-                    "event=chat.stream.end status=success sessionId={} durationMs={} tokenCount={} traceId={}",
-                    sessionId,
-                    durationMs,
-                    usageTotal,
-                    TraceIds.current());
+            log.info(ChatFlowLog.msg(
+                    "07.助手消息保存",
+                    "messageId=" + assistant.getId()
+                            + " chars=" + buffer.length()
+                            + " tokenEvents=" + tokenEvents.get()
+                            + " usageTotal=" + usageTotal
+                            + " content=\"" + ChatFlowLog.preview(buffer.toString()) + "\""));
+            log.info(ChatFlowLog.msg(
+                    "08.结束",
+                    "status=success sessionId=" + sessionId
+                            + " durationMs=" + durationMs
+                            + " assistantMessageId=" + assistant.getId()
+                            + " usageTotal=" + usageTotal));
             sseBridge.send(emitter, "done", Map.of(
                     "messageId", assistant.getId().toString(),
                     "usage", metadata.getOrDefault("usage", Map.of())));
             emitter.complete();
         } catch (SseStreamBridge.SseBrokenException broken) {
-            log.debug("完成阶段客户端已断开");
+            log.debug(ChatFlowLog.msg("08.客户端已断开", "sessionId=" + sessionId));
         } catch (Exception ex) {
             chatMetrics.recordError(ErrorCode.INTERNAL_ERROR.getCode(), durationMs);
-            log.error("流结束落库失败", ex);
+            log.error(ChatFlowLog.msg("08.结束", "status=persist_fail sessionId=" + sessionId), ex);
             sseBridge.sendError(emitter, ErrorCode.INTERNAL_ERROR.getCode(), "保存回复失败");
         }
     }
@@ -250,7 +318,11 @@ public class ChatService {
             return;
         }
         long durationMs = System.currentTimeMillis() - startedAtRef.get();
-        log.warn("聊天流失败 sessionId={}: {}", sessionId, err.toString());
+        log.warn(ChatFlowLog.msg(
+                "08.结束",
+                "status=upstream_fail sessionId=" + sessionId
+                        + " durationMs=" + durationMs
+                        + " error=\"" + ChatFlowLog.preview(err.toString()) + "\""));
         if (err instanceof BizException biz) {
             chatMetrics.recordError(biz.getErrorCode().getCode(), durationMs);
             sseBridge.sendError(emitter, biz.getErrorCode().getCode(), biz.getMessage());
@@ -264,8 +336,8 @@ public class ChatService {
         if (subscription != null && !subscription.isDisposed()) {
             subscription.dispose();
         }
-        // 仅在流未正常结束时通知 Python 取消，避免多余 cancel
         if (!finished.get()) {
+            log.info(ChatFlowLog.msg("08.取消", "sessionId=" + sessionId + " reason=client_disconnect"));
             aiPlaneClient.cancel(sessionId.toString(), TraceIds.current());
             finished.set(true);
         }

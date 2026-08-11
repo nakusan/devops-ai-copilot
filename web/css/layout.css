@@ -61,6 +61,26 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.session-list-active {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.session-list-archived {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.session-archived-label {
+  color: #999;
+  letter-spacing: 0.02em;
 }
 
 .session-group-label {
@@ -87,6 +107,15 @@ body {
 .session-item.active {
   background: #dbeafe;
   color: #2563eb;
+}
+
+.session-item-archived {
+  color: #888;
+}
+
+.session-item-archived.active {
+  background: #ececed;
+  color: #666;
 }
 
 .session-item-title {

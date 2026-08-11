@@ -7,6 +7,7 @@ import {
   deleteSession,
   renderSessionList,
   deriveTitleFromMessage,
+  isSessionArchived,
   DEFAULT_TITLE,
 } from './sessions.js';
 import {
@@ -22,6 +23,8 @@ import {
   showAssistantError,
   finishAssistantMessage,
   isStreaming,
+  isComposerReadOnly,
+  setComposerReadOnly,
   scrollToBottom,
 } from './chat.js';
 import { initTxtChoiceDialog, processSelectedFile } from './upload.js';
@@ -55,6 +58,7 @@ async function refreshSessions() {
 function showWelcomeState() {
   currentSessionId = null;
   currentSessionTitle = DEFAULT_TITLE;
+  setComposerReadOnly(false);
   clearMessages();
   showEmptyState(true);
   renderSessionList(sessions, null, {
@@ -67,6 +71,7 @@ async function startNewChat() {
   if (isStreaming()) return;
   currentSessionId = null;
   currentSessionTitle = DEFAULT_TITLE;
+  setComposerReadOnly(false);
   clearMessages();
   showEmptyState(true);
   renderSessionList(sessions, null, {
@@ -77,11 +82,18 @@ async function startNewChat() {
 }
 
 async function ensureSession() {
-  if (currentSessionId) return currentSessionId;
+  if (currentSessionId) {
+    const current = sessions.find((s) => s.id === currentSessionId);
+    if (isSessionArchived(current)) {
+      throw { code: 'FORBIDDEN', message: '会话已归档，无法继续对话' };
+    }
+    return currentSessionId;
+  }
 
   const session = await createSession(DEFAULT_TITLE);
   currentSessionId = session.id;
   currentSessionTitle = session.title || DEFAULT_TITLE;
+  setComposerReadOnly(false);
   sessions.unshift(session);
   renderSessionList(sessions, currentSessionId, {
     onSelect: selectSession,
@@ -96,6 +108,7 @@ async function selectSession(sessionId) {
   currentSessionId = sessionId;
   const session = sessions.find((s) => s.id === sessionId);
   currentSessionTitle = session?.title || DEFAULT_TITLE;
+  setComposerReadOnly(isSessionArchived(session));
 
   renderSessionList(sessions, currentSessionId, {
     onSelect: selectSession,
@@ -121,19 +134,22 @@ async function selectSession(sessionId) {
 
 async function removeSession(sessionId) {
   if (isStreaming()) return;
-  if (!confirm('确定删除此对话？')) return;
+  if (!confirm('确定归档此对话？归档后仅可查看，不能继续发送消息。')) return;
 
   try {
     await deleteSession(sessionId);
-    sessions = sessions.filter((s) => s.id !== sessionId);
-    if (currentSessionId === sessionId) {
-      showWelcomeState();
-    } else {
-      renderSessionList(sessions, currentSessionId, {
-        onSelect: selectSession,
-        onDelete: removeSession,
-      });
+    const session = sessions.find((s) => s.id === sessionId);
+    if (session) {
+      session.status = 'ARCHIVED';
+      session.updatedAt = new Date().toISOString();
     }
+    if (currentSessionId === sessionId) {
+      setComposerReadOnly(true);
+    }
+    renderSessionList(sessions, currentSessionId, {
+      onSelect: selectSession,
+      onDelete: removeSession,
+    });
   } catch (err) {
     showToast(getErrorMessage(err));
     handleAuthError(err);
@@ -159,7 +175,7 @@ async function maybeUpdateSessionTitle(content) {
 }
 
 async function sendMessage() {
-  if (isStreaming()) return;
+  if (isStreaming() || isComposerReadOnly()) return;
 
   const input = document.getElementById('message-input');
   const content = input.value.trim();
@@ -233,6 +249,11 @@ function setupComposer() {
 
     if (!isLoggedIn()) {
       showAuthOverlay();
+      return;
+    }
+
+    if (isComposerReadOnly()) {
+      showToast('已归档会话不可上传文件');
       return;
     }
 

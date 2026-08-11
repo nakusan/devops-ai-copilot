@@ -1,22 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  默认：可读 console pattern（含 traceId/spanId MDC）。
-  profile=json：Logstash JSON encoder，便于 Loki/集中采集（设计 6.7 §3.2.3）。
+  默认：可读 console（东八区），方便 docker logs 肉眼追踪。
+  profile=json：Logstash JSON（集中采集 / 生产）。
 -->
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
     <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="control-plane"/>
 
+    <!-- 本地/Compose 默认：一行一条，带时区与 traceId -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [traceId=%X{traceId}] [spanId=%X{spanId}] %logger{36} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS,Asia/Shanghai} %-5level [traceId=%X{traceId}] %logger{24} - %msg%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
 
     <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <timeZone>Asia/Shanghai</timeZone>
             <includeMdcKeyName>traceId</includeMdcKeyName>
             <includeMdcKeyName>spanId</includeMdcKeyName>
             <customFields>{"service":"${appName}"}</customFields>
@@ -27,6 +29,7 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
+        <logger name="com.devops.copilot.modules.conversation" level="INFO"/>
     </springProfile>
 
     <springProfile name="json">

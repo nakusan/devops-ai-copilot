@@ -10,6 +10,7 @@ from openai import AsyncOpenAI, RateLimitError
 
 from app.config import settings
 from app.graph.models.stream_event import StreamEvent, error_event, token_event
+from app.observability.logging import chat_msg, preview
 from app.observability.metrics import LLM_TTFB
 from app.observability.otel import get_tracer
 
@@ -38,6 +39,14 @@ async def stream_chat(
     """流式生成 token 事件；结束时 usage 写入 LlmStreamResult（通过 generator attribute）。"""
     mode = settings.effective_llm_mode()
     timeout = timeout_seconds or settings.llm_timeout_seconds
+    logger.info(
+        chat_msg(
+            "14.llm_mode",
+            f"mode={mode} model={model} temp={temperature} "
+            f"msgCount={len(messages)} timeoutSec={timeout} "
+            f"user=\"{preview(user_message)}\"",
+        )
+    )
 
     if mode == "mock":
         async for evt in _mock_stream(messages, model, cancel_event, user_message):

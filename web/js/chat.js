@@ -1,6 +1,7 @@
 import { api, getAccessToken, tryRefreshToken, clearTokens, getErrorMessage } from './api.js';
 
 let streaming = false;
+let composerReadOnly = false;
 
 export function isStreaming() {
   return streaming;
@@ -11,13 +12,37 @@ export function setStreaming(value) {
   updateComposerDisabled();
 }
 
+/** 归档会话仅可查看历史，禁用输入区。 */
+export function setComposerReadOnly(value) {
+  composerReadOnly = Boolean(value);
+  updateComposerDisabled();
+}
+
+export function isComposerReadOnly() {
+  return composerReadOnly;
+}
+
 function updateComposerDisabled() {
   const sendBtn = document.getElementById('btn-send');
   const input = document.getElementById('message-input');
   const attachBtn = document.getElementById('btn-attach');
-  sendBtn.disabled = streaming;
-  attachBtn.disabled = streaming;
-  input.disabled = streaming;
+  const wrap = document.querySelector('.composer-wrap');
+  const notice = document.getElementById('archived-notice');
+  const disabled = streaming || composerReadOnly;
+
+  sendBtn.disabled = disabled;
+  attachBtn.disabled = disabled;
+  input.disabled = disabled;
+  wrap?.classList.toggle('composer-readonly', composerReadOnly);
+  notice?.classList.toggle('hidden', !composerReadOnly);
+
+  if (composerReadOnly) {
+    input.placeholder = '已归档会话不可继续对话';
+    input.value = '';
+    input.style.height = 'auto';
+  } else if (!streaming) {
+    input.placeholder = '输入你的问题...';
+  }
 }
 
 export async function loadMessages(sessionId, page = 1, size = 50) {

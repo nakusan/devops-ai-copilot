@@ -3,9 +3,12 @@ package com.devops.copilot.modules.conversation.controller;
 import com.devops.copilot.common.security.SecurityUtils;
 import com.devops.copilot.modules.conversation.config.ChatProperties;
 import com.devops.copilot.modules.conversation.controller.dto.ChatRequest;
+import com.devops.copilot.modules.conversation.logging.ChatFlowLog;
 import com.devops.copilot.modules.conversation.service.ChatService;
 import com.devops.copilot.modules.security.domain.UserPrincipal;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +22,8 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/sessions")
 public class ChatController {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
 
     private final ChatService chatService;
     private final ChatProperties chatProperties;
@@ -35,6 +40,14 @@ public class ChatController {
     public SseEmitter chat(
             @PathVariable UUID sessionId, @Valid @RequestBody ChatRequest request) {
         UserPrincipal principal = SecurityUtils.currentUser();
+        log.info(ChatFlowLog.msg(
+                "01.SSE聊天入口",
+                "sessionId=" + sessionId
+                        + " userId=" + principal.getUserId()
+                        + " teamId=" + principal.getTeamId()
+                        + " clientMessageId=" + request.getClientMessageId()
+                        + " chars=" + (request.getContent() == null ? 0 : request.getContent().length())
+                        + " content=\"" + ChatFlowLog.preview(request.getContent()) + "\""));
         SseEmitter emitter = new SseEmitter(chatProperties.getSseTimeout().toMillis());
         chatService.streamChat(sessionId, request, principal, emitter);
         return emitter;
