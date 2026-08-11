@@ -1,4 +1,7 @@
-"""可读日志格式（默认）+ 可选 JSON；聊天链路统一 [CHAT] 前缀。"""
+"""可读日志格式（默认）+ 可选 JSON；聊天链路统一 [CHAT] 前缀。
+
+约定：`[CHAT] step=序号.中文步骤名 key=value ...`，文本字段用 preview 截断。
+"""
 
 from __future__ import annotations
 

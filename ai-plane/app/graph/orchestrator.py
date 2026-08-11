@@ -34,7 +34,7 @@ async def run_diagnosis_stream(
         try:
             logger.info(
                 chat_msg(
-                    "11.graph_start",
+                    "11.图开始",
                     f"sessionId={req.session_id} "
                     f"user=\"{preview(req.user_message)}\"",
                 ),
@@ -54,7 +54,7 @@ async def run_diagnosis_stream(
             analysis_preview = preview(str(analysis_summary) if analysis_summary else "")
             logger.info(
                 chat_msg(
-                    "12.graph_done",
+                    "12.图完成",
                     f"sessionId={req.session_id} intent={intent} "
                     f"citations={len(citations)} chunks={len(chunks)} "
                     f"toolCalls={len(tool_calls)} "
@@ -78,7 +78,7 @@ async def run_diagnosis_stream(
 
             logger.info(
                 chat_msg(
-                    "13.llm_start",
+                    "13.LLM开始",
                     f"sessionId={req.session_id} model={cfg.model} "
                     f"temp={cfg.temperature} msgCount={len(messages)}",
                 ),
@@ -117,7 +117,7 @@ async def run_diagnosis_stream(
             )
             logger.info(
                 chat_msg(
-                    "15.done",
+                    "15.完成",
                     f"sessionId={req.session_id} durationMs={latency_ms} "
                     f"intent={intent} usage={usage}",
                 ),
@@ -128,7 +128,7 @@ async def run_diagnosis_stream(
         except Exception as ex:  # noqa: BLE001
             logger.exception(
                 chat_msg(
-                    "15.error",
+                    "15.错误",
                     f"sessionId={req.session_id} error=\"{preview(str(ex))}\"",
                 ),
                 extra={"trace_id": req.trace_id or ""},

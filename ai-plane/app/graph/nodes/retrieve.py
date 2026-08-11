@@ -19,7 +19,7 @@ async def retrieve_node(state: DiagnosisState) -> dict[str, Any]:
     cfg = state.get("agent_config") or {}
     if not cfg.get("enable_rag", True):
         logger.info(
-            chat_msg("11.retrieve", "skipped=true reason=enable_rag_false"),
+            chat_msg("11.检索", "skipped=true reason=enable_rag_false"),
             extra={"trace_id": state.get("trace_id") or ""},
         )
         return {"retrieved_chunks": [], "citations": []}
@@ -45,7 +45,7 @@ async def retrieve_node(state: DiagnosisState) -> dict[str, Any]:
     latency_ms = int((time.perf_counter() - started) * 1000)
     logger.info(
         chat_msg(
-            "11.retrieve",
+            "11.检索",
             f"teamId={team_id} topK={top_k} threshold={threshold} "
             f"hits={len(hits)} latencyMs={latency_ms} "
             f"titles={titles} query=\"{preview(query)}\"",

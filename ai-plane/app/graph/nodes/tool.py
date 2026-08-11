@@ -52,7 +52,7 @@ async def tool_node(state: DiagnosisState) -> dict[str, Any]:
     ]
     logger.info(
         chat_msg(
-            "11.tool",
+            "11.工具",
             f"calls={len(results)} summary={summary} "
             f"preview=\"{preview(str(results))}\"",
         ),

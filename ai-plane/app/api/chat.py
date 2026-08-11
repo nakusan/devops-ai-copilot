@@ -34,7 +34,7 @@ async def chat_stream(
     cfg = req.agent_config
     logger.info(
         chat_msg(
-            "10.recv",
+            "10.接收请求",
             f"sessionId={req.session_id} backend={settings.chat_backend} "
             f"model={cfg.model} historyCount={history_count} "
             f"enableRag={cfg.enable_rag} enableMcp={cfg.enable_mcp} "
@@ -59,7 +59,7 @@ async def chat_stream(
                     if token_n == 1 or token_n % 20 == 0:
                         logger.info(
                             chat_msg(
-                                "16.token_out",
+                                "16.输出Token",
                                 f"sessionId={req.session_id} n={token_n} "
                                 f"chunk=\"{preview(event.text)}\"",
                             ),
@@ -68,7 +68,7 @@ async def chat_stream(
                 elif event.type == "citation":
                     logger.info(
                         chat_msg(
-                            "16.citation_out",
+                            "16.输出引用",
                             f"sessionId={req.session_id} data={preview(str(event.data))}",
                         ),
                         extra={"trace_id": req.trace_id or ""},
@@ -76,7 +76,7 @@ async def chat_stream(
                 elif event.type in ("done", "error"):
                     logger.info(
                         chat_msg(
-                            "16.event_out",
+                            "16.输出事件",
                             f"sessionId={req.session_id} type={event.type} "
                             f"payload={preview(event.model_dump_json(exclude_none=True))}",
                         ),
@@ -87,7 +87,7 @@ async def chat_stream(
             cancel_registry.unregister(req.session_id)
             logger.info(
                 chat_msg(
-                    "17.stream_close",
+                    "17.流关闭",
                     f"sessionId={req.session_id} tokenEvents={token_n}",
                 ),
                 extra={"trace_id": req.trace_id or ""},
@@ -100,7 +100,7 @@ async def chat_stream(
 async def chat_cancel(body: CancelRequest, _: ServiceTokenDep) -> dict[str, bool]:
     """客户端断开 SSE 时由 Java 回调，打断进行中的 Mock/LLM 循环。"""
     logger.info(
-        chat_msg("18.cancel", f"sessionId={body.session_id}"),
+        chat_msg("18.取消", f"sessionId={body.session_id}"),
         extra={"trace_id": getattr(body, "trace_id", None) or ""},
     )
     cancel_registry.cancel(body.session_id)

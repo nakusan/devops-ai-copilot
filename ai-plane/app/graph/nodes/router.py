@@ -72,7 +72,7 @@ def router_node(state: DiagnosisState) -> dict[str, Any]:
 
     logger.info(
         chat_msg(
-            "11.router",
+            "11.路由",
             f"intent={intent} ragHit={rag_hit} toolHit={tool_hit} "
             f"enableRag={enable_rag} enableMcp={enable_mcp} "
             f"user=\"{preview(msg)}\"",

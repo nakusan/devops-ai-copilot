@@ -41,7 +41,7 @@ async def stream_chat(
     timeout = timeout_seconds or settings.llm_timeout_seconds
     logger.info(
         chat_msg(
-            "14.llm_mode",
+            "14.LLM模式",
             f"mode={mode} model={model} temp={temperature} "
             f"msgCount={len(messages)} timeoutSec={timeout} "
             f"user=\"{preview(user_message)}\"",
