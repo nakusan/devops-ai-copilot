@@ -72,10 +72,15 @@ class Settings(BaseSettings):
     # knowledge / analysis，逗号分隔；空或未设则两者都启
     worker_roles: str = "knowledge,analysis"
 
-    # --- Observability（W10）---
+    # --- Observability（W10 / Phase 7）---
     otel_service_name: str = "ai-plane"
     # 空则不导出 OTLP，仅进程内 Tracer（日志关联）
     otel_exporter_otlp_endpoint: str | None = None
+    # Resource 属性：Grafana 按环境 / 版本筛选
+    service_version: str = "0.1.0"
+    deploy_env: str = "dev"
+    # 采样率：1.0=全采样；<1 时用 TraceIdRatioBased（ParentBased 尊重上游决策）
+    otel_sample_rate: float = 1.0
 
     # --- Chat HTTP 后端（W11：默认走 LangGraph orchestrator；可回退 mock）---
     chat_backend: Literal["orchestrator", "mock"] = "orchestrator"

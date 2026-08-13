@@ -23,13 +23,21 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from app.config import settings
-from app.observability import configure_logging, setup_otel
+from app.observability import (
+    configure_logging,
+    instrument_asyncpg,
+    instrument_httpx,
+    setup_otel,
+    shutdown_otel,
+)
 
 configure_logging(service_name=f"{settings.otel_service_name}-worker")
 setup_otel(
     service_name=f"{settings.otel_service_name}-worker",
     otlp_endpoint=settings.otel_exporter_otlp_endpoint,
 )
+instrument_httpx()
+instrument_asyncpg()
 logger = logging.getLogger("app.worker")
 
 
@@ -97,8 +105,10 @@ async def _run() -> None:
         exc = t.exception()
         if exc is not None:
             logger.exception("worker task failed name=%s", t.get_name(), exc_info=exc)
+            shutdown_otel()
             raise SystemExit(1) from exc
 
+    shutdown_otel()
     logger.info("worker stopped cleanly")
 
 

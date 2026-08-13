@@ -16,6 +16,7 @@ dependencies = [
     "openai>=1.55.0",
     "opentelemetry-api>=1.28.0",
     "opentelemetry-exporter-otlp-proto-http>=1.28.0",
+    "opentelemetry-instrumentation-asyncpg>=0.49b0",
     "opentelemetry-instrumentation-fastapi>=0.49b0",
     "opentelemetry-instrumentation-httpx>=0.49b0",
     "opentelemetry-sdk>=1.28.0",

@@ -16,13 +16,25 @@ from app.clients import java_internal_client as _jic_mod
 from app.clients import minio_client
 from app.config import settings
 from app.observability.logging import ingest_msg, preview
+from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
 _KIND = "analysis"
+_tracer = get_tracer("ai-plane.analysis")
 
 
 async def handle_analysis_ingest(event: AnalysisIngestEvent, *, retry_count: int = 0) -> None:
     """处理单条分析事件（幂等：COMPLETED 跳过）。"""
+    with _tracer.start_as_current_span("analysis.process") as span:
+        span.set_attribute("analysis.job_id", str(event.job_id))
+        span.set_attribute("analysis.file_type", event.file_type or "")
+        span.set_attribute("analysis.retry_count", retry_count)
+        await _handle_analysis_ingest(event, retry_count=retry_count)
+
+
+async def _handle_analysis_ingest(
+    event: AnalysisIngestEvent, *, retry_count: int = 0
+) -> None:
     trace = event.trace_id or ""
     java = _jic_mod.java_internal_client
     job = await java.get_analysis_job(event.job_id)

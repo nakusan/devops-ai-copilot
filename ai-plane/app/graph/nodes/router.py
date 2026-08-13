@@ -6,8 +6,10 @@ from typing import Any
 
 from app.graph.state import DiagnosisState
 from app.observability.logging import chat_msg, preview
+from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
+_tracer = get_tracer("ai-plane.graph")
 
 # RAG：内部知识 / 错误码 / 原因排查
 RAG_PATTERNS = [
@@ -48,39 +50,41 @@ def router_node(state: DiagnosisState) -> dict[str, Any]:
 
     优先级：analysis > rag_and_tool > tool > rag > 默认 rag/direct。
     """
-    msg = state.get("user_message", "")
-    cfg = state.get("agent_config") or {}
-    enable_rag = cfg.get("enable_rag", True)
-    enable_mcp = cfg.get("enable_mcp", True)
+    with _tracer.start_as_current_span("graph.router") as span:
+        msg = state.get("user_message", "")
+        cfg = state.get("agent_config") or {}
+        enable_rag = cfg.get("enable_rag", True)
+        enable_mcp = cfg.get("enable_mcp", True)
 
-    rag_hit = enable_rag and _matches(RAG_PATTERNS, msg)
-    tool_hit = enable_mcp and _matches(TOOL_PATTERNS, msg)
+        rag_hit = enable_rag and _matches(RAG_PATTERNS, msg)
+        tool_hit = enable_mcp and _matches(TOOL_PATTERNS, msg)
 
-    if _matches(ANALYSIS_PATTERNS, msg):
-        intent = "analysis"
-    elif rag_hit and tool_hit:
-        intent = "rag_and_tool"
-    elif tool_hit:
-        intent = "tool"
-    elif rag_hit:
-        intent = "rag"
-    elif enable_rag:
-        # 运维场景默认偏向查知识库
-        intent = "rag"
-    else:
-        intent = "direct"
+        if _matches(ANALYSIS_PATTERNS, msg):
+            intent = "analysis"
+        elif rag_hit and tool_hit:
+            intent = "rag_and_tool"
+        elif tool_hit:
+            intent = "tool"
+        elif rag_hit:
+            intent = "rag"
+        elif enable_rag:
+            # 运维场景默认偏向查知识库
+            intent = "rag"
+        else:
+            intent = "direct"
 
-    logger.info(
-        chat_msg(
-            "11.路由",
-            f"intent={intent} ragHit={rag_hit} toolHit={tool_hit} "
-            f"enableRag={enable_rag} enableMcp={enable_mcp} "
-            f"user=\"{preview(msg)}\"",
-        ),
-        extra={"trace_id": state.get("trace_id") or ""},
-    )
-    # TODO(Phase-5/V1.1): LLM intent 分类 — MVP 规则优先省成本 — 规则未命中时调小模型
-    return {"intent": intent}
+        span.set_attribute("graph.intent", intent)
+        logger.info(
+            chat_msg(
+                "11.路由",
+                f"intent={intent} ragHit={rag_hit} toolHit={tool_hit} "
+                f"enableRag={enable_rag} enableMcp={enable_mcp} "
+                f"user=\"{preview(msg)}\"",
+            ),
+            extra={"trace_id": state.get("trace_id") or ""},
+        )
+        # TODO(Phase-5/V1.1): LLM intent 分类 — MVP 规则优先省成本 — 规则未命中时调小模型
+        return {"intent": intent}
 
 
 def route_by_intent(state: DiagnosisState) -> str:

@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.observability.otel import get_tracer
 
 if TYPE_CHECKING:
     pass
+
+_tracer = get_tracer("ai-plane.rag")
 
 
 def deterministic_embed(text: str, dim: int | None = None) -> list[float]:
@@ -56,10 +59,15 @@ class EmbeddingClient:
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        if self._client is None:
-            return [deterministic_embed(t, self._dim) for t in texts]
-        resp = await self._client.embeddings.create(model=self._model, input=texts)
-        return [item.embedding for item in resp.data]
+        with _tracer.start_as_current_span("rag.embed") as span:
+            span.set_attribute("rag.embed.batch_size", len(texts))
+            span.set_attribute("rag.embed.model", self._model)
+            if self._client is None:
+                span.set_attribute("rag.embed.mode", "deterministic")
+                return [deterministic_embed(t, self._dim) for t in texts]
+            span.set_attribute("rag.embed.mode", "api")
+            resp = await self._client.embeddings.create(model=self._model, input=texts)
+            return [item.embedding for item in resp.data]
 
     async def embed_query(self, query: str) -> list[float]:
         vectors = await self.embed_batch([query])

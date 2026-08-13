@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 from app.config import settings
+from app.observability.kafka_trace import kafka_consumer_span, mark_dlq
 from app.observability.logging import ingest_msg
 from app.rag.consumer.handlers.knowledge_ingest_handler import handle_knowledge_ingest
 from app.rag.models.events import KnowledgeIngestEvent
@@ -47,7 +49,7 @@ async def run_knowledge_ingest_consumer(stop_event: asyncio.Event | None = None)
                 continue
             for _tp, messages in batch.items():
                 for msg in messages:
-                    await _process_one(msg.value, producer)
+                    await _process_one(msg, producer)
             await consumer.commit()
     finally:
         await consumer.stop()
@@ -55,49 +57,54 @@ async def run_knowledge_ingest_consumer(stop_event: asyncio.Event | None = None)
         logger.info(ingest_msg(_KIND, "00.consumer", "status=stopped"))
 
 
-async def _process_one(raw: bytes | None, producer: AIOKafkaProducer) -> None:
+async def _process_one(msg: Any, producer: AIOKafkaProducer) -> None:
+    raw = msg.value
     if raw is None:
         return
-    try:
-        event = KnowledgeIngestEvent.model_validate_json(raw)
-    except Exception:
-        logger.exception(ingest_msg(_KIND, "10.consume_fail", "reason=invalid_event"))
-        return
 
-    logger.info(
-        ingest_msg(
-            _KIND,
-            "10.consume",
-            f"jobId={event.job_id} documentId={event.document_id} "
-            f"objectKey={event.object_key} traceId={event.trace_id or ''}",
-        ),
-        extra={"trace_id": event.trace_id or ""},
-    )
-
-    retries = 0
-    while True:
+    with kafka_consumer_span(msg) as span:
         try:
-            await handle_knowledge_ingest(event, retry_count=retries)
-            return
+            event = KnowledgeIngestEvent.model_validate_json(raw)
         except Exception:
-            retries += 1
-            if retries >= settings.ingest_max_retries:
-                logger.error(
+            logger.exception(ingest_msg(_KIND, "10.consume_fail", "reason=invalid_event"))
+            return
+
+        logger.info(
+            ingest_msg(
+                _KIND,
+                "10.consume",
+                f"jobId={event.job_id} documentId={event.document_id} "
+                f"objectKey={event.object_key} traceId={event.trace_id or ''}",
+            ),
+            extra={"trace_id": event.trace_id or ""},
+        )
+
+        retries = 0
+        while True:
+            try:
+                await handle_knowledge_ingest(event, retry_count=retries)
+                return
+            except Exception:
+                retries += 1
+                span.add_event("retry", {"attempt": retries})
+                if retries >= settings.ingest_max_retries:
+                    logger.error(
+                        ingest_msg(
+                            _KIND,
+                            "18.dlq",
+                            f"jobId={event.job_id} retries={retries} action=send_dlq",
+                        ),
+                        extra={"trace_id": event.trace_id or ""},
+                    )
+                    mark_dlq(span)
+                    await producer.send_and_wait(settings.kafka_knowledge_dlq, raw)
+                    return
+                logger.warning(
                     ingest_msg(
                         _KIND,
-                        "18.dlq",
-                        f"jobId={event.job_id} retries={retries} action=send_dlq",
+                        "11.retry",
+                        f"jobId={event.job_id} attempt={retries} max={settings.ingest_max_retries}",
                     ),
                     extra={"trace_id": event.trace_id or ""},
                 )
-                await producer.send_and_wait(settings.kafka_knowledge_dlq, raw)
-                return
-            logger.warning(
-                ingest_msg(
-                    _KIND,
-                    "11.retry",
-                    f"jobId={event.job_id} attempt={retries} max={settings.ingest_max_retries}",
-                ),
-                extra={"trace_id": event.trace_id or ""},
-            )
-            await asyncio.sleep(min(2**retries, 30))
+                await asyncio.sleep(min(2**retries, 30))

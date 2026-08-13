@@ -12,7 +12,7 @@ from app.graph.models.stream_event import StreamEvent, done_event, error_event
 from app.graph.state import DiagnosisState, init_state_from_request
 from app.graph.streaming.event_emitter import build_done_payload, citation_event
 from app.observability.logging import chat_msg, preview
-from app.observability.metrics import CHAT_STREAM_DURATION
+from app.observability.metrics import CHAT_STREAM_DURATION, observe_with_exemplar
 from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
@@ -135,4 +135,4 @@ async def run_diagnosis_stream(
             )
             yield error_event("AGENT_ERROR", str(ex))
         finally:
-            CHAT_STREAM_DURATION.observe(time.perf_counter() - started)
+            observe_with_exemplar(CHAT_STREAM_DURATION, time.perf_counter() - started)

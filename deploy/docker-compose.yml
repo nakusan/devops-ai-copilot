@@ -133,6 +133,9 @@ services:
       AI_PLANE_BASE_URL: http://ai-plane:8000
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-to-a-long-random-secret-key}
       SERVICE_TOKEN_SECRET: ${SERVICE_TOKEN_SECRET:-dev-only-service-token-secret-change-me}
+      # Phase 7 / P2：Java → Tempo OTLP（endpoint 必须含 /v1/traces）
+      TRACING_OTLP_ENDPOINT: ${TRACING_OTLP_ENDPOINT:-http://tempo:4318/v1/traces}
+      TRACING_SAMPLE_RATE: ${TRACING_SAMPLE_RATE:-1.0}
       # 本地默认可读文本日志；需要 JSON 时：SPRING_PROFILES_ACTIVE=json
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
       TZ: Asia/Shanghai
@@ -144,6 +147,8 @@ services:
       kafka:
         condition: service_healthy
       minio:
+        condition: service_started
+      tempo:
         condition: service_started
       # 不硬等 ai-plane：WebClient 懒连接；避免与「Python 回调 Java」形成编排死锁感
     restart: unless-stopped
@@ -174,6 +179,8 @@ services:
       CHAT_BACKEND: orchestrator
       MCP_ENABLED: "true"
       OTEL_SERVICE_NAME: ai-plane
+      # OTLP/HTTP：endpoint 必须含 /v1/traces（设计 6.10 §4.5）
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4318/v1/traces}
       TZ: Asia/Shanghai
       LOG_FORMAT: ${LOG_FORMAT:-text}
     depends_on:
@@ -182,6 +189,8 @@ services:
       kafka:
         condition: service_healthy
       minio:
+        condition: service_started
+      tempo:
         condition: service_started
     # ai-plane HTTP 不强制等 control-plane：避免循环依赖（Java 依赖 Python health）
     # Worker / 回调路径在 control-plane 起来后自然可用
@@ -211,6 +220,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       WORKER_ROLES: knowledge,analysis
       OTEL_SERVICE_NAME: ai-plane
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4318/v1/traces}
       TZ: Asia/Shanghai
       LOG_FORMAT: ${LOG_FORMAT:-text}
     depends_on:
@@ -222,9 +232,27 @@ services:
         condition: service_started
       control-plane:
         condition: service_healthy
+      tempo:
+        condition: service_started
     # Worker 无 HTTP，关闭镜像默认 healthcheck
     healthcheck:
       disable: true
+    restart: unless-stopped
+
+  # Phase 7 / P1：Tempo 直连 OTLP（设计 6.10 §4）
+  tempo:
+    image: grafana/tempo:2.5.0
+    container_name: dac-tempo
+    # 卷挂载后容器内需要写权限；grafana/tempo 镜像默认非 root，本地开发直接用 root 省事
+    user: "0"
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "23200:3200"   # 宿主机 23200 → 容器查询 API 3200
+      - "4318:4318"   # OTLP/HTTP（应用上报用）
+      - "4317:4317"   # OTLP/gRPC（预留）
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
     restart: unless-stopped
 
   # Phase 5 / W10：可观测栈（发布态：同网络服务名抓取，见 prometheus/prometheus.yml）
@@ -237,6 +265,8 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
     ports:
       - "9090:9090"
     volumes:
@@ -262,6 +292,7 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+      - tempo
     restart: unless-stopped
 
 volumes:
@@ -269,3 +300,4 @@ volumes:
   minio_data:
   prometheus_data:
   grafana_data:
+  tempo_data:

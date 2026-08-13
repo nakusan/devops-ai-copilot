@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: control-plane
+  # WebClient / 流式订阅跨线程时传递 Observation 上下文（设计 6.10 P2）
+  reactor:
+    context-propagation: auto
   servlet:
     multipart:
       # 分析文件上限 100MB；知识库 20MB 由业务层再校验
@@ -11,6 +14,9 @@ spring:
       max-request-size: 105MB
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    # P3 透传 traceparent header；P2 一并打开（无副作用）
+    template:
+      observation-enabled: true
     producer:
       acks: all
       retries: 3
@@ -61,6 +67,13 @@ management:
       percentiles-histogram:
         http.server.requests: true
         chat.stream.duration: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+  otlp:
+    tracing:
+      # 必须含 /v1/traces（OTLP/HTTP）；Compose 内用 tempo 服务名
+      endpoint: ${TRACING_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
 
 # 业务自定义配置（与设计书 security.* / copilot.* 对齐）
 copilot:

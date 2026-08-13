@@ -11,7 +11,7 @@ from pathlib import Path
 from app.clients.java_internal_client import java_internal_client
 from app.config import settings
 from app.observability.logging import ingest_msg, preview
-from app.observability.metrics import INGEST_DURATION, INGEST_FAILURES
+from app.observability.metrics import INGEST_DURATION, INGEST_FAILURES, observe_with_exemplar
 from app.observability.otel import get_tracer
 from app.rag.models.events import KnowledgeIngestEvent
 from app.rag.pipeline.chunker import chunk_text
@@ -105,7 +105,7 @@ async def handle_knowledge_ingest(event: KnowledgeIngestEvent, *, retry_count: i
 
             await java_internal_client.patch_ingest_job(event.job_id, status="COMPLETED")
             duration_ms = int((time.perf_counter() - started) * 1000)
-            INGEST_DURATION.observe(time.perf_counter() - started)
+            observe_with_exemplar(INGEST_DURATION, time.perf_counter() - started)
             logger.info(
                 ingest_msg(
                     _KIND,
@@ -117,7 +117,7 @@ async def handle_knowledge_ingest(event: KnowledgeIngestEvent, *, retry_count: i
             )
         except Exception as ex:
             INGEST_FAILURES.labels(reason=type(ex).__name__).inc()
-            INGEST_DURATION.observe(time.perf_counter() - started)
+            observe_with_exemplar(INGEST_DURATION, time.perf_counter() - started)
             duration_ms = int((time.perf_counter() - started) * 1000)
             logger.exception(
                 ingest_msg(

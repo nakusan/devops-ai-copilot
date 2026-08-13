@@ -19,7 +19,7 @@ from mcp.client.stdio import stdio_client
 from app.mcp.config import McpServerConfig, default_servers
 from app.mcp.models import ToolResult
 from app.mcp.whitelist import ToolNotAllowedError, validate_arguments
-from app.observability.metrics import MCP_TOOL_CALLS, MCP_TOOL_LATENCY
+from app.observability.metrics import MCP_TOOL_CALLS, MCP_TOOL_LATENCY, observe_with_exemplar
 from app.observability.otel import get_tracer
 from mcp import ClientSession, StdioServerParameters
 
@@ -84,8 +84,9 @@ class McpClient:
                     )
                 data = self._parse_content(raw)
                 latency_ms = int((time.perf_counter() - started) * 1000)
-                MCP_TOOL_LATENCY.labels(server=server, tool=name).observe(
-                    time.perf_counter() - started
+                observe_with_exemplar(
+                    MCP_TOOL_LATENCY.labels(server=server, tool=name),
+                    time.perf_counter() - started,
                 )
                 MCP_TOOL_CALLS.labels(server=server, tool=name, status="ok").inc()
                 logger.info(
@@ -124,7 +125,10 @@ class McpClient:
         message: str,
     ) -> ToolResult:
         latency_ms = int((time.perf_counter() - started) * 1000)
-        MCP_TOOL_LATENCY.labels(server=server, tool=name).observe(time.perf_counter() - started)
+        observe_with_exemplar(
+            MCP_TOOL_LATENCY.labels(server=server, tool=name),
+            time.perf_counter() - started,
+        )
         MCP_TOOL_CALLS.labels(server=server, tool=name, status="error").inc()
         logger.warning(
             "event=mcp.tool.call server=%s tool=%s success=false error=%s latency_ms=%s",

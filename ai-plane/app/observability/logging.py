@@ -36,13 +36,16 @@ def _current_trace_context() -> tuple[str, str]:
 
 
 def _resolve_trace(record: logging.LogRecord) -> tuple[str, str]:
+    """优先取 OTel 当前 span 的 trace/span id；无活跃 span 时回退 extra（设计 6.10 §5.4）。"""
     trace_id, span_id = _current_trace_context()
-    extra_trace = record.__dict__.get("trace_id")
-    if extra_trace:
-        trace_id = str(extra_trace)
-    extra_span = record.__dict__.get("span_id")
-    if extra_span:
-        span_id = str(extra_span)
+    if not trace_id:
+        extra_trace = record.__dict__.get("trace_id")
+        if extra_trace:
+            trace_id = str(extra_trace)
+    if not span_id:
+        extra_span = record.__dict__.get("span_id")
+        if extra_span:
+            span_id = str(extra_span)
     return trace_id or "", span_id or ""
 
 

@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      # P4 打开：从 trace 跳到对应服务的指标面板
+      tracesToMetrics:
+        datasourceUid: prometheus
+      serviceMap:
+        datasourceUid: prometheus

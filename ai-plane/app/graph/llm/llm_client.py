@@ -11,7 +11,7 @@ from openai import AsyncOpenAI, RateLimitError
 from app.config import settings
 from app.graph.models.stream_event import StreamEvent, error_event, token_event
 from app.observability.logging import chat_msg, preview
-from app.observability.metrics import LLM_TTFB
+from app.observability.metrics import LLM_TTFB, observe_with_exemplar
 from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,9 @@ async def stream_chat(
     )
 
     if mode == "mock":
-        async for evt in _mock_stream(messages, model, cancel_event, user_message):
+        async for evt in _mock_stream(
+            messages, model, temperature, cancel_event, user_message
+        ):
             yield evt
         return
 
@@ -58,9 +60,19 @@ async def stream_chat(
         yield evt
 
 
+def _set_usage_attrs(span: Any, usage: dict[str, Any]) -> None:
+    if not usage:
+        return
+    if "promptTokens" in usage:
+        span.set_attribute("gen_ai.usage.input_tokens", int(usage["promptTokens"]))
+    if "completionTokens" in usage:
+        span.set_attribute("gen_ai.usage.output_tokens", int(usage["completionTokens"]))
+
+
 async def _mock_stream(
     messages: list[dict[str, str]],
     model: str,
+    temperature: float,
     cancel_event: asyncio.Event,
     user_message: str,
 ) -> AsyncIterator[StreamEvent]:
@@ -75,7 +87,10 @@ async def _mock_stream(
     ttfb_started = time.perf_counter()
     first_token = True
 
-    with _tracer.start_as_current_span("llm.completion"):
+    with _tracer.start_as_current_span("llm.completion") as span:
+        span.set_attribute("gen_ai.system", "mock")
+        span.set_attribute("gen_ai.request.model", model)
+        span.set_attribute("gen_ai.request.temperature", float(temperature))
         for i in range(0, len(full), chunk_size):
             if cancel_event.is_set():
                 yield error_event("CANCELLED", "生成已取消")
@@ -83,26 +98,28 @@ async def _mock_stream(
             piece = full[i : i + chunk_size]
             produced += len(piece)
             if first_token:
-                LLM_TTFB.observe(time.perf_counter() - ttfb_started)
+                ttfb = time.perf_counter() - ttfb_started
+                span.set_attribute("llm.ttfb_ms", int(ttfb * 1000))
+                observe_with_exemplar(LLM_TTFB, ttfb)
                 first_token = False
             yield token_event(piece)
             if delay > 0:
                 await asyncio.sleep(delay)
 
-    if cancel_event.is_set():
-        yield error_event("CANCELLED", "生成已取消")
-        return
+        if cancel_event.is_set():
+            yield error_event("CANCELLED", "生成已取消")
+            return
 
-    # Mock usage 粗估
-    prompt_tokens = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
-    completion_tokens = max(1, produced // 4)
-    _attach_usage(
-        {
+        # Mock usage 粗估
+        prompt_tokens = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
+        completion_tokens = max(1, produced // 4)
+        usage = {
             "promptTokens": prompt_tokens,
             "completionTokens": completion_tokens,
             "totalTokens": prompt_tokens + completion_tokens,
         }
-    )
+        _set_usage_attrs(span, usage)
+        _attach_usage(usage)
 
 
 async def _openai_stream(
@@ -131,7 +148,10 @@ async def _openai_stream(
             try:
                 ttfb_started = time.perf_counter()
                 first_token = True
-                with _tracer.start_as_current_span("llm.completion"):
+                with _tracer.start_as_current_span("llm.completion") as span:
+                    span.set_attribute("gen_ai.system", "openai_compatible")
+                    span.set_attribute("gen_ai.request.model", model)
+                    span.set_attribute("gen_ai.request.temperature", float(temperature))
                     stream = await client.chat.completions.create(
                         model=model,
                         messages=messages,  # type: ignore[arg-type]
@@ -153,9 +173,12 @@ async def _openai_stream(
                         delta = chunk.choices[0].delta.content if chunk.choices else None
                         if delta:
                             if first_token:
-                                LLM_TTFB.observe(time.perf_counter() - ttfb_started)
+                                ttfb = time.perf_counter() - ttfb_started
+                                span.set_attribute("llm.ttfb_ms", int(ttfb * 1000))
+                                observe_with_exemplar(LLM_TTFB, ttfb)
                                 first_token = False
                             yield token_event(delta)
+                    _set_usage_attrs(span, usage)
                     _attach_usage(usage)
                     return
             except RateLimitError:

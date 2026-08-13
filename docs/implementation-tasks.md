@@ -3,7 +3,7 @@
 > 状态约定：`[ ]` 未做 · `[~]` 进行中 · `[x]` 完成  
 > 设计资料见同目录其他文档；**本文件仅跟踪实施进度，不替代设计书**。
 
-最后更新：2026-08-05
+最后更新：2026-08-13（Phase 7 P1~P4 代码落地）
 
 ---
 
@@ -122,6 +122,51 @@
   - CI：Java `test`+`package`；Python ruff + **pyright** + pytest；Docker buildx + compose config
   - 工程化补强：`copilot_ro` 只读角色；Prometheus 容器服务发现抓取
   - Makefile：`stack-up` / `stack-down`；`ci-local` 对齐本地检查
+
+---
+
+## Phase 7 — 链路追踪补全（设计见 `6.10链路追踪落地设计(Tracing).md`）
+
+> 背景：当前只有 traceId 字符串在日志里串联，Python span 因未配 OTLP 出口被全部丢弃，Java 侧无真实 span。
+> 决策：Java 走 `micrometer-tracing-bridge-otel`；后端只加 Tempo 直连；Kafka 用 parent-child；前端不纳入。
+
+### P7-1 Python span 出口（半天，收益最大）
+
+- [x] P7-01 Tempo 服务 + Grafana Tempo datasource + Compose `OTEL_EXPORTER_OTLP_ENDPOINT`
+- [x] P7-02 `otel.py` 补 Resource / 显式 sampler / `shutdown_otel()`；`worker.py` / FastAPI lifespan 退出前 flush
+- [x] P7-03 `logging.py` traceId 优先级翻转（OTel span 优先于 `extra`）
+- [x] P7-04 实测异步生成器跨 `yield` 持有 span（§9 R1）：同任务内父子关系正常；结论已回填 `6.10`；联调时再观察 detach 警告
+  - 联调剩余：`make stack-up` 后在 Grafana Tempo 验证 chat span 树（见设计书 §5.5 / §10 P1-6、P1-7）
+  - [x] P1 补丁 F4：`FastAPIInstrumentor.exclude_spans=["send","receive"]`，消除流式 `http send` 噪音
+
+### P7-2 Java 接入同一棵树
+
+- [x] P7-05 `micrometer-tracing-bridge-otel` + `opentelemetry-exporter-otlp`；`management.tracing` / `management.otlp`；`spring.reactor.context-propagation=auto`；Kafka `observation-enabled` 预开
+- [x] P7-06 `TraceIdFilter` 重构：从 `Tracer.currentSpan()` 取 traceId；`@Order(+2)`；单测重写
+- [x] P7-07 `AiPlaneClient` 删手拼 traceparent 与 `padTraceId`；`TraceIds` 删假 `newSpanId`；Compose `TRACING_OTLP_ENDPOINT` / `TRACING_SAMPLE_RATE`
+  - 联调剩余：Tempo 中验证跨 `control-plane` + `ai-plane` 父子 span（§6.6 / §10 P2-1~P2-3）
+
+### P7-3 异步链路与关键埋点
+
+- [x] P7-08 `spring.kafka.template.observation-enabled` + Python consumer 从 record header `extract`
+- [x] P7-09 asyncpg 自动埋点；补 `rag.embed` / `graph.router` / `analysis.process` span
+- [x] P7-10 清理重复 server span（FastAPIInstrumentor 与自研 middleware 二选一）；metrics `path` label 改路由模板
+- [x] P7-11 `llm.completion` 补 `gen_ai.*` 语义属性（模型 / 温度 / token 用量）
+  - 联调剩余：上传 PDF 同树；asyncpg SELECT 可见（§7.6 / §10 P3-1、P3-2）
+
+### P7-4 三信号互跳
+
+- [x] P7-12 Tempo↔Prometheus 跳转、exemplars、Overview Dashboard 慢请求 TraceQL 面板
+- [x] P7-13 更新 `runbooks/slow-request-drill.md` 为「先看 trace」路径
+  - 联调剩余：Dashboard exemplar 跳转 + 一次 Postmortem 演练（§10 P4-1、P4-2、P4-4）
+
+### Phase 7 明确延后
+
+- Loki + Alloy 日志集中化（V2）
+- OTel Collector + 尾采样（V2）
+- 前端 RUM / OTel Web SDK（V2）
+- Java JDBC / Redis 自动埋点（V2，需 Agent）
+- LLM 自动埋点包（V2，待 GenAI 语义约定稳定）
 
 ---
 

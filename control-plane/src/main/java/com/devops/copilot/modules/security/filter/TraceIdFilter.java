@@ -1,6 +1,8 @@
 package com.devops.copilot.modules.security.filter;
 
 import com.devops.copilot.common.trace.TraceIds;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -11,32 +13,40 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 全链路 TraceId 注入（原则 P9：以 W3C traceparent 为准）。
+ * 将当前 Micrometer span 的 traceId 写入响应头 {@code X-Trace-Id}（设计 6.10 §6.4）。
  *
- * <p>为何放在 Security 链之前：401/429 响应也要带同一个 traceId，方便客户端报障。
+ * <p>traceId 的生成 / W3C 传播由 micrometer-tracing + ServerHttpObservationFilter 负责。
+ * 本 Filter 挂在 Security 链最前（见 {@code SecurityConfig}），晚于 Servlet 层的
+ * ObservationFilter，因此 {@link Tracer#currentSpan()} 通常可用；401/429 仍带同一 traceId。
  *
- * <p>MVP 同步写入 spanId 到 MDC，供 JSON 日志与出站 traceparent 使用（完整 OTel SDK 埋点可 V1 替换）。
+ * <p>{@code @Order(HIGHEST_PRECEDENCE + 2)} 与设计书一致；因 {@code FilterRegistrationConfig}
+ * 禁用了 Servlet 自动注册，实际顺序由 Security 链决定，已天然晚于 ObservationFilter。
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 2)
 public class TraceIdFilter extends OncePerRequestFilter {
+
+    private final Tracer tracer;
+
+    public TraceIdFilter(Tracer tracer) {
+        this.tracer = tracer;
+    }
 
     @Override
     protected void doFilterInternal(
             HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         try {
-            ParsedTrace parsed = parseTraceparent(request.getHeader(TraceIds.HEADER_TRACEPARENT))
-                    .orElseGet(() -> new ParsedTrace(
-                            UUID.randomUUID().toString().replace("-", ""),
-                            TraceIds.newSpanId()));
-            TraceIds.set(parsed.traceId());
-            TraceIds.setSpanId(parsed.spanId());
-            response.setHeader(TraceIds.HEADER_X_TRACE_ID, parsed.traceId());
+            Span current = tracer.currentSpan();
+            String traceId = current != null ? current.context().traceId() : fallbackTraceId();
+            TraceIds.set(traceId);
+            if (current != null) {
+                TraceIds.setSpanId(current.context().spanId());
+            }
+            response.setHeader(TraceIds.HEADER_X_TRACE_ID, traceId);
             filterChain.doFilter(request, response);
         } finally {
             // 线程可能被容器复用，必须清理 MDC，否则串请求
@@ -44,31 +54,8 @@ public class TraceIdFilter extends OncePerRequestFilter {
         }
     }
 
-    /**
-     * traceparent 格式：version-traceId-spanId-flags，例如
-     * {@code 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01}
-     */
-    static Optional<String> extractFromTraceparent(String traceparent) {
-        return parseTraceparent(traceparent).map(ParsedTrace::traceId);
-    }
-
-    static Optional<ParsedTrace> parseTraceparent(String traceparent) {
-        if (traceparent == null || traceparent.isBlank()) {
-            return Optional.empty();
-        }
-        String[] parts = traceparent.trim().split("-");
-        if (parts.length < 4) {
-            return Optional.empty();
-        }
-        String traceId = parts[1];
-        String parentSpanId = parts[2];
-        if (traceId.length() != 32 || parentSpanId.length() != 16) {
-            return Optional.empty();
-        }
-        // 入站 parent 作为关联参考；本服务作为新 span 根，生成自己的 spanId
-        return Optional.of(new ParsedTrace(traceId, TraceIds.newSpanId()));
-    }
-
-    record ParsedTrace(String traceId, String spanId) {
+    /** tracing 关闭或 Observation 尚未创建时的降级路径（设计 6.10 §11）。 */
+    static String fallbackTraceId() {
+        return UUID.randomUUID().toString().replace("-", "");
     }
 }

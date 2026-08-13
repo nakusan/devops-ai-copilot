@@ -30,7 +30,19 @@
           "refId": "A"
         }
       ],
-      "datasource": { "type": "prometheus", "uid": "prometheus" }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "exemplars": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "auto"
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "title": "Chat Error Rate",
@@ -56,7 +68,10 @@
           "refId": "A"
         }
       ],
-      "datasource": { "type": "prometheus", "uid": "prometheus" }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "exemplars": true
+      }
     },
     {
       "title": "RAG Retrieval P99",
@@ -69,7 +84,10 @@
           "refId": "A"
         }
       ],
-      "datasource": { "type": "prometheus", "uid": "prometheus" }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "exemplars": true
+      }
     },
     {
       "title": "LLM TTFB P99",
@@ -82,7 +100,10 @@
           "refId": "A"
         }
       ],
-      "datasource": { "type": "prometheus", "uid": "prometheus" }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "exemplars": true
+      }
     },
     {
       "title": "MCP Tool P99",
@@ -122,14 +143,71 @@
         }
       ],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
+    },
+    {
+      "title": "Slow Requests (>5s) — TraceQL",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "filters": [
+            {
+              "id": "service-name",
+              "tag": "resource.service.name",
+              "operator": "=",
+              "value": ["ai-plane"],
+              "scope": "resource"
+            },
+            {
+              "id": "min-duration",
+              "operator": ">",
+              "value": "5s",
+              "scope": "intrinsic",
+              "tag": "duration"
+            }
+          ],
+          "limit": 20
+        }
+      ]
+    },
+    {
+      "title": "Error Traces — TraceQL",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "{ status = error }",
+          "limit": 20,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Slow RAG retrieve (>500ms)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "{ name = \"rag.retrieve\" && duration > 500ms }",
+          "limit": 20,
+          "refId": "A"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,
-  "tags": ["devops-ai-copilot", "mvp"],
+  "tags": ["devops-ai-copilot", "mvp", "tracing"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timezone": "browser",
   "title": "DevOps AI Copilot Overview",
   "uid": "dac-overview",
-  "version": 1
+  "version": 2
 }

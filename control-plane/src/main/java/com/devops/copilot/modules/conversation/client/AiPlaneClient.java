@@ -21,6 +21,10 @@ import reactor.core.publisher.Flux;
  *
  * <p><b>流式请求故意不做重试</b>：重试会让下游再次生成，客户端收到重复 token。
  * 失败应返回 error 事件，由用户决定是否重发。
+ *
+ * <p>W3C {@code traceparent} 由 Micrometer Observation + 注入的 {@link WebClient.Builder}
+ * 自动注入（设计 6.10 §6.5）。切勿改成 {@code WebClient.create()}，否则传播会静默失效。
+ * 业务头 {@code X-Trace-Id} 仍手动附带，供 Python 记为 {@code copilot.trace_id}。
  */
 @Component
 public class AiPlaneClient {
@@ -50,10 +54,6 @@ public class AiPlaneClient {
     public Flux<StreamEvent> streamChat(InternalChatRequest request) {
         String token = serviceTokenProvider.issue();
         String traceId = request.getTraceId() != null ? request.getTraceId() : TraceIds.current();
-        String spanId = TraceIds.currentSpanId();
-        if (spanId == null || spanId.isBlank() || spanId.length() != 16) {
-            spanId = TraceIds.newSpanId();
-        }
 
         int historyCount = request.getHistory() == null ? 0 : request.getHistory().size();
         String model = request.getAgentConfig() != null ? request.getAgentConfig().getModel() : null;
@@ -69,7 +69,7 @@ public class AiPlaneClient {
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(NDJSON)
                 .header(ServiceTokenProvider.HEADER, token)
-                .header(TraceIds.HEADER_TRACEPARENT, "00-" + padTraceId(traceId) + "-" + spanId + "-01")
+                // traceparent：ObservationWebClientCustomizer 自动注入；勿手拼
                 .header(TraceIds.HEADER_X_TRACE_ID, traceId)
                 .bodyValue(request)
                 .retrieve()
@@ -89,6 +89,7 @@ public class AiPlaneClient {
                     .uri("/internal/v1/chat/cancel")
                     .contentType(MediaType.APPLICATION_JSON)
                     .header(ServiceTokenProvider.HEADER, serviceTokenProvider.issue())
+                    .header(TraceIds.HEADER_X_TRACE_ID, traceId != null ? traceId : TraceIds.current())
                     .bodyValue(new CancelChatRequest(sessionId, traceId))
                     .retrieve()
                     .toBodilessEntity()
@@ -106,14 +107,5 @@ public class AiPlaneClient {
         } catch (Exception ex) {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "无法解析 AI Plane NDJSON: " + line);
         }
-    }
-
-    /** W3C trace-id 要求 32 位 hex；本地短 id 左侧补 0。 */
-    static String padTraceId(String raw) {
-        String hex = raw == null ? "" : raw.replace("-", "").toLowerCase();
-        if (hex.length() >= 32) {
-            return hex.substring(0, 32);
-        }
-        return "0".repeat(32 - hex.length()) + hex;
     }
 }

@@ -1,55 +1,49 @@
-"""FastAPI 中间件：传播 trace 上下文 + 基础 HTTP 计数。"""
+"""FastAPI 中间件：仅记 HTTP 指标 + 挂业务 trace 属性（设计 6.10 §7.3）。
+
+span 创建与 W3C extract 交给 FastAPIInstrumentor，避免重复 server span（F1）。
+path label 用路由模板，避免 UUID 高基数（F2）。
+"""
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 
+from opentelemetry import trace
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.observability.metrics import HTTP_REQUESTS
-from app.observability.otel import get_tracer
 
 
 class ObservabilityMiddleware(BaseHTTPMiddleware):
-    """从入站 header 提取 W3C context，创建 internal span，并记录 http_requests_total。"""
+    """记录 http_requests_total；把 X-Trace-Id 挂到当前 server span。"""
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
-        self._tracer = get_tracer("ai-plane.http")
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # /metrics 自身不计入业务请求，避免 scrape 污染
         if request.url.path == "/metrics":
             return await call_next(request)
 
-        from opentelemetry.propagate import extract
-
-        ctx = extract(dict(request.headers))
-        started = time.perf_counter()
         status = 500
-        with self._tracer.start_as_current_span(
-            f"{request.method} {request.url.path}",
-            context=ctx,
-        ) as span:
-            # 业务契约字段：Java 也传 X-Trace-Id / body.traceId
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            # FastAPIInstrumentor 已建 server span；中间件须挂在其内侧（见 main.py 顺序）
+            span = trace.get_current_span()
             x_trace = request.headers.get("x-trace-id")
-            if x_trace:
+            if x_trace and span is not None and span.is_recording():
                 span.set_attribute("copilot.trace_id", x_trace)
-            try:
-                response = await call_next(request)
-                status = response.status_code
-                return response
-            finally:
-                span.set_attribute("http.status_code", status)
-                # 低基数 path：去掉 UUID 等动态段会更好，MVP 先用原始 path
-                path = request.url.path
-                HTTP_REQUESTS.labels(
-                    method=request.method,
-                    path=path,
-                    status=str(status),
-                ).inc()
-                _ = time.perf_counter() - started
+
+            route = request.scope.get("route")
+            path = getattr(route, "path", None) or request.url.path
+            HTTP_REQUESTS.labels(
+                method=request.method,
+                path=path,
+                status=str(status),
+            ).inc()

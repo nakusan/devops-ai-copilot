@@ -6,7 +6,7 @@ from typing import Any
 
 from app.graph.state import DiagnosisState
 from app.observability.logging import chat_msg, preview
-from app.observability.metrics import RAG_RETRIEVAL_LATENCY
+from app.observability.metrics import RAG_RETRIEVAL_LATENCY, observe_with_exemplar
 from app.observability.otel import get_tracer
 from app.rag.retrieval.retriever import retriever_service
 
@@ -37,7 +37,7 @@ async def retrieve_node(state: DiagnosisState) -> dict[str, Any]:
             team_id=team_id,
         )
         span.set_attribute("rag.hits", len(hits))
-        RAG_RETRIEVAL_LATENCY.observe(time.perf_counter() - started)
+        observe_with_exemplar(RAG_RETRIEVAL_LATENCY, time.perf_counter() - started)
 
     chunks = [h.to_retrieved_dict() for h in hits]
     citations = [h.to_citation() for h in hits]
