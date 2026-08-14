@@ -57,22 +57,19 @@ body {
   background: #f0f0f0;
 }
 
+/*
+ * 唯一的滚动区。刻意不用 flex 列布局：子区块一旦可收缩（flex-shrink）又没有自己的
+ * overflow，会话条目就会被压到区块高度之外、画到下一区块上（曾导致"已归档"与标题重叠），
+ * 而且外层因为一直在收缩永远不出现滚动条。普通块级流下各区块取内容高度，不会重叠。
+ */
 .session-list {
   flex: 1;
   overflow-y: auto;
   padding: 0 8px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.session-list-active {
-  flex: 1 1 auto;
   min-height: 0;
 }
 
 .session-list-archived {
-  flex: 0 0 auto;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid #e5e5e5;
@@ -311,9 +308,41 @@ body {
   font-size: 13px;
 }
 
+.file-row-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .file-row-title {
   font-weight: 500;
-  margin-bottom: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row-delete {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #fff;
+  color: #d33;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-row-delete:hover:not(:disabled) {
+  border-color: #d33;
+  background: #fff5f5;
+}
+
+.file-row-delete:disabled {
+  color: #bbb;
+  cursor: not-allowed;
 }
 
 .file-row-meta {

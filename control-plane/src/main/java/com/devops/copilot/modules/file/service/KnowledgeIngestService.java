@@ -142,6 +142,37 @@ public class KnowledgeIngestService {
         return toDocResponse(requireOwnedDoc(documentId, userId));
     }
 
+    /**
+     * 硬删文档：DB 行 + MinIO 原件。
+     *
+     * <p>刻意不加 {@code @Transactional}：{@code knowledge_chunks} 与 {@code ingest_jobs}
+     * 的外键都是 ON DELETE CASCADE，单条 DELETE 已由 PG 原子地清完三张表。
+     *
+     * <p>MinIO 必须放在 DB 成功之后。残留对象只是存储垃圾；反过来若 DB 行残留而对象已删，
+     * RAG 会继续命中这些切片并给出无法溯源的引用。
+     *
+     * <p>PENDING/PROCESSING 拒绝删除：此时 Kafka worker 可能正在处理，删掉行会让
+     * 它的状态回调撞上 404。等它跑到 COMPLETED 或 FAILED 再删。
+     */
+    public void delete(UUID documentId, Long userId) {
+        KnowledgeDocument doc = requireOwnedDoc(documentId, userId);
+        if (!JobStatus.isTerminal(doc.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "文档正在处理中，请等待处理结束后再删除");
+        }
+        if (documentMapper.deleteById(documentId) == 0) {
+            // 并发重复删除：已被另一请求删掉，按幂等处理
+            return;
+        }
+        boolean objectRemoved = fileStorageService.removeQuietly(doc.getObjectKey(), KIND);
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "20.deleted",
+                "documentId=" + documentId
+                        + " objectKey=" + doc.getObjectKey()
+                        + " prevStatus=" + doc.getStatus()
+                        + " objectRemoved=" + objectRemoved));
+    }
+
     public PageResponse<KnowledgeDocumentResponse> listMine(Long userId, long page, long size) {
         Page<KnowledgeDocument> p = documentMapper.selectPage(
                 new Page<>(page, size),

@@ -10,6 +10,7 @@ import com.devops.copilot.modules.security.domain.UserPrincipal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -65,5 +66,17 @@ public class KnowledgeDocumentController {
             @RequestParam(defaultValue = "20") long size) {
         UserPrincipal user = SecurityUtils.currentUser();
         return knowledgeIngestService.listMine(user.getUserId(), page, size);
+    }
+
+    /**
+     * 硬删文档：连带切片、入库任务与 MinIO 原件，不可恢复。
+     *
+     * <p>处理中（PENDING/PROCESSING）返回 409。
+     */
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable("id") UUID id) {
+        UserPrincipal user = SecurityUtils.currentUser();
+        knowledgeIngestService.delete(id, user.getUserId());
     }
 }

@@ -133,6 +133,36 @@ public class AnalysisJobService {
         return toResponse(requireOwned(jobId, userId));
     }
 
+    /**
+     * 硬删分析任务：DB 行 + MinIO 源文件 + 结果 JSON。
+     *
+     * <p>{@code analysis_jobs} 没有任何指向它的外键，一条 DELETE 即可，无需 CASCADE。
+     * 源文件与 result.json 是两个独立对象，都要清；{@code resultObjectKey} 在
+     * 未跑完或失败时为 null，由 {@code removeQuietly} 内部忽略。
+     *
+     * <p>与知识库文档同理，PENDING/PROCESSING 拒绝删除，避免与 worker 回调竞争。
+     */
+    public void delete(UUID jobId, Long userId) {
+        AnalysisJob job = requireOwned(jobId, userId);
+        if (!JobStatus.isTerminal(job.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "分析任务正在处理中，请等待处理结束后再删除");
+        }
+        if (analysisJobMapper.deleteById(jobId) == 0) {
+            // 并发重复删除：已被另一请求删掉，按幂等处理
+            return;
+        }
+        boolean sourceRemoved = fileStorageService.removeQuietly(job.getObjectKey(), KIND);
+        boolean resultRemoved = fileStorageService.removeQuietly(job.getResultObjectKey(), KIND);
+        log.info(IngestFlowLog.msg(
+                KIND,
+                "20.deleted",
+                "jobId=" + jobId
+                        + " objectKey=" + job.getObjectKey()
+                        + " prevStatus=" + job.getStatus()
+                        + " sourceRemoved=" + sourceRemoved
+                        + " resultRemoved=" + resultRemoved));
+    }
+
     public PageResponse<AnalysisJobResponse> listMine(Long userId, long page, long size) {
         Page<AnalysisJob> p = analysisJobMapper.selectPage(
                 new Page<>(page, size),

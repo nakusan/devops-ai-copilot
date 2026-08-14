@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # 调整后必须重新入库，已有 chunk 不会自动重切。
     chunk_size: int = 512
     chunk_overlap: int = 64
+    # 切完后丢弃：实义字符（汉字/字母/数字）过少或占比过低的块，挡住残留目录/分隔线。
+    chunk_min_substantive_chars: int = 20
+    chunk_min_substantive_ratio: float = 0.40
     embedding_batch_size: int = 32
 
     # --- Analysis MVP（W8）---

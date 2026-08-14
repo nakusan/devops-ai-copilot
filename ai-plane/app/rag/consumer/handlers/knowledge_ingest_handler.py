@@ -74,19 +74,24 @@ async def handle_knowledge_ingest(event: KnowledgeIngestEvent, *, retry_count: i
                 extra={"trace_id": trace},
             )
 
+            chunk_stats: dict = {}
             chunks = chunk_text(
                 text,
                 base_metadata={
                     "source_object_key": event.object_key,
                     "embedding_model_version": settings.embedding_model_version,
                 },
+                stats=chunk_stats,
             )
+            if not chunks:
+                raise ValueError("切块后无有效内容（可能整篇都是目录或页眉）")
             payloads = await embed_chunks(chunks)
             logger.info(
                 ingest_msg(
                     _KIND,
                     "14.embed",
-                    f"jobId={event.job_id} chunks={len(chunks)} vectors={len(payloads)}",
+                    f"jobId={event.job_id} chunks={len(chunks)} "
+                    f"dropped={chunk_stats.get('dropped', 0)} vectors={len(payloads)}",
                 ),
                 extra={"trace_id": trace},
             )
