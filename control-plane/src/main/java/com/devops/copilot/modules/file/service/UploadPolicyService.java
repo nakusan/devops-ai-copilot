@@ -51,7 +51,8 @@ public class UploadPolicyService {
                     "userId=" + userId + " count=" + count + " limit=" + limit + " status=exceeded"));
             throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，每小时最多 " + limit + " 次");
         }
-        log.info(IngestFlowLog.msg(
+        // 未触发限流是常态，降到 DEBUG；只有 exceeded 才值得占一行 WARN
+        log.debug(IngestFlowLog.msg(
                 kind,
                 "02.rate_limit",
                 "userId=" + userId + " count=" + count + " limit=" + limit + " status=ok"));

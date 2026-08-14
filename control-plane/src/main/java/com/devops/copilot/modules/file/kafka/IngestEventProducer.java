@@ -40,31 +40,28 @@ public class IngestEventProducer {
 
     public long publishKnowledgeIngest(KnowledgeIngestEvent event) {
         String topic = topicProperties.getTopics().getKnowledgeIngest();
-        return send("knowledge", topic, event.getDocumentId().toString(), event, event.getJobId(), event.getTraceId());
+        return send("knowledge", topic, event.getDocumentId().toString(), event, event.getJobId());
     }
 
     public long publishAnalysisIngest(AnalysisIngestEvent event) {
         String topic = topicProperties.getTopics().getAnalysisIngest();
-        send("analysis", topic, event.getJobId().toString(), event, event.getJobId(), event.getTraceId());
+        send("analysis", topic, event.getJobId().toString(), event, event.getJobId());
         return -1L;
     }
 
     public void publishKnowledgeDlq(KnowledgeIngestEvent event) {
         String topic = topicProperties.getTopics().getKnowledgeDlq();
-        send("knowledge", topic, event.getDocumentId().toString(), event, event.getJobId(), event.getTraceId());
+        send("knowledge", topic, event.getDocumentId().toString(), event, event.getJobId());
     }
 
     public void publishAnalysisDlq(AnalysisIngestEvent event) {
         String topic = topicProperties.getTopics().getAnalysisDlq();
-        send("analysis", topic, event.getJobId().toString(), event, event.getJobId(), event.getTraceId());
+        send("analysis", topic, event.getJobId().toString(), event, event.getJobId());
     }
 
-    private long send(
-            String kind, String topic, String key, Object event, java.util.UUID jobId, String traceId) {
-        log.info(IngestFlowLog.msg(
-                kind,
-                "06.kafka_send",
-                "topic=" + topic + " key=" + key + " jobId=" + jobId + " traceId=" + traceId));
+    private long send(String kind, String topic, String key, Object event, java.util.UUID jobId) {
+        // 发送前不打日志：同步 send 后紧跟 kafka_ok / kafka_fail，两者必有其一。
+        // traceId 也不入正文，logback pattern 已带 [traceId=%X{traceId}]。
         try {
             CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(topic, key, event);
             SendResult<String, Object> result = future.get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);

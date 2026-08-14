@@ -37,7 +37,8 @@ async def run_knowledge_ingest_consumer(stop_event: asyncio.Event | None = None)
         ingest_msg(
             _KIND,
             "00.consumer",
-            f"status=started topic={settings.kafka_knowledge_topic} group={settings.kafka_ingest_group}",
+            f"status=started topic={settings.kafka_knowledge_topic} "
+            f"group={settings.kafka_ingest_group}",
         )
     )
     try:

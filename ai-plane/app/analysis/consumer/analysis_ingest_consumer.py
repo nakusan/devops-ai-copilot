@@ -38,7 +38,8 @@ async def run_analysis_ingest_consumer(stop_event: asyncio.Event | None = None) 
         ingest_msg(
             _KIND,
             "00.consumer",
-            f"status=started topic={settings.kafka_analysis_topic} group={settings.kafka_analysis_group}",
+            f"status=started topic={settings.kafka_analysis_topic} "
+            f"group={settings.kafka_analysis_group}",
         )
     )
     try:

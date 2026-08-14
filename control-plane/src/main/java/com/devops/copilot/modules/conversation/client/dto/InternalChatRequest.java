@@ -127,7 +127,9 @@ public class InternalChatRequest {
         private boolean enableRag = true;
         private boolean enableMcp = true;
         private int ragTopK = 5;
-        private double ragScoreThreshold = 0.7;
+        // 可空：仅当 agents.config_json 显式配置时才下发。
+        // 默认值只保留在 ai-plane 的 settings.rag_score_threshold，此处不得再设兜底值。
+        private Double ragScoreThreshold;
         private double temperature = 0.2;
         private int maxHistoryMessages = 20;
         private List<String> mcpServers = new ArrayList<>();
@@ -173,11 +175,11 @@ public class InternalChatRequest {
             this.ragTopK = ragTopK;
         }
 
-        public double getRagScoreThreshold() {
+        public Double getRagScoreThreshold() {
             return ragScoreThreshold;
         }
 
-        public void setRagScoreThreshold(double ragScoreThreshold) {
+        public void setRagScoreThreshold(Double ragScoreThreshold) {
             this.ragScoreThreshold = ragScoreThreshold;
         }
 

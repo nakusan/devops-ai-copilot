@@ -89,13 +89,8 @@ class McpClient:
                     time.perf_counter() - started,
                 )
                 MCP_TOOL_CALLS.labels(server=server, tool=name, status="ok").inc()
-                logger.info(
-                    "event=mcp.tool.call server=%s tool=%s success=true latency_ms=%s",
-                    server,
-                    name,
-                    latency_ms,
-                    extra={"trace_id": trace_id or "", "event": "mcp.tool.call"},
-                )
+                # 成功不打日志：ToolNode 的 12.工具 已汇总 ok/err，
+                # 单次延迟有 MCP_TOOL_LATENCY 指标与 mcp.tool span。失败见 _fail。
                 return ToolResult(
                     success=True,
                     server=server,

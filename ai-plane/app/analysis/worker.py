@@ -64,16 +64,8 @@ async def _handle_analysis_ingest(
     tmp: Path | None = None
     started = time.perf_counter()
     try:
+        # 下载不单独打日志：objectKey 已在 11.process_start，失败会走 17.end
         tmp = await asyncio.to_thread(minio_client.download_to_temp, event.object_key)
-        logger.info(
-            ingest_msg(
-                _KIND,
-                "12.download",
-                f"jobId={event.job_id} objectKey={event.object_key} tmp={tmp}",
-            ),
-            extra={"trace_id": trace},
-        )
-
         text = await asyncio.to_thread(sample_text, tmp, settings.analysis_sample_bytes)
         logger.info(
             ingest_msg(
@@ -90,8 +82,8 @@ async def _handle_analysis_ingest(
             ingest_msg(
                 _KIND,
                 "14.analyze",
-                f"jobId={event.job_id} fileType={event.file_type} "
-                f"summaryLen={len(summary)} summary=\"{preview(summary)}\"",
+                f"jobId={event.job_id} summaryLen={len(summary)} "
+                f"summary=\"{preview(summary)}\"",
             ),
             extra={"trace_id": trace},
         )
@@ -119,8 +111,7 @@ async def _handle_analysis_ingest(
             ingest_msg(
                 _KIND,
                 "17.end",
-                f"jobId={event.job_id} status=COMPLETED durationMs={duration_ms} "
-                f"summary=\"{preview(summary)}\"",
+                f"jobId={event.job_id} status=COMPLETED durationMs={duration_ms}",
             ),
             extra={"trace_id": trace},
         )

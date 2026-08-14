@@ -23,23 +23,16 @@ async def analysis_lookup_node(state: DiagnosisState) -> dict[str, Any]:
         user_ctx = state.get("user_context") or {}
         user_id = user_ctx.get("user_id") or user_ctx.get("userId")
         if user_id is None:
-            logger.warning(chat_msg("11.分析摘要", "status=skip reason=missing_user_id"))
+            logger.warning(chat_msg("12.分析", "status=skip reason=missing_user_id"))
             return {"analysis_summary": None}
 
-        job = await java_internal_client.get_latest_analysis_job(int(user_id))
-        if not job:
-            logger.info(
-                chat_msg("11.分析摘要", f"userId={user_id} status=empty"),
-                extra={"trace_id": state.get("trace_id") or ""},
-            )
-            return {"analysis_summary": None}
-
+        job = await java_internal_client.get_latest_analysis_job(int(user_id)) or {}
         summary = job.get("resultSummary") or job.get("result_summary")
-        job_id = job.get("jobId") or job.get("id")
+        # 无 job 与有 job 无摘要合成一条：jobId=- / summary="" 已自解释
         logger.info(
             chat_msg(
-                "11.分析摘要",
-                f"userId={user_id} jobId={job_id} hasSummary={bool(summary)} "
+                "12.分析",
+                f"userId={user_id} jobId={job.get('jobId') or job.get('id') or '-'} "
                 f"summary=\"{preview(str(summary) if summary else '')}\"",
             ),
             extra={"trace_id": state.get("trace_id") or ""},
@@ -47,7 +40,7 @@ async def analysis_lookup_node(state: DiagnosisState) -> dict[str, Any]:
         return {"analysis_summary": summary}
     except Exception:
         logger.exception(
-            chat_msg("11.分析摘要", f"userId={user_id} status=error"),
+            chat_msg("12.分析", f"userId={user_id} status=error"),
             extra={"trace_id": state.get("trace_id") or ""},
         )
         return {"analysis_summary": None}

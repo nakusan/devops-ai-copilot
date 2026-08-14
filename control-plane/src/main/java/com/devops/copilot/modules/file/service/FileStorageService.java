@@ -51,14 +51,8 @@ public class FileStorageService {
             if (contentType != null && !contentType.isBlank()) {
                 builder.contentType(contentType);
             }
+            // 成功不打日志：objectKey / sizeBytes 由调用方的 05.stored 承载；失败见下方 04.minio_fail
             minioClient.putObject(builder.build());
-            log.info(IngestFlowLog.msg(
-                    kind,
-                    "04.minio_upload",
-                    "bucket=" + properties.getBucket()
-                            + " objectKey=" + objectKey
-                            + " sizeBytes=" + size
-                            + " contentType=" + contentType));
         } catch (Exception ex) {
             log.error(IngestFlowLog.msg(
                     kind,

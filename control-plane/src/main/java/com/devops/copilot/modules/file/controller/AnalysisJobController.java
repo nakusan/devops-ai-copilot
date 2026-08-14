@@ -54,13 +54,8 @@ public class AnalysisJobController {
                         + " filename=\"" + IngestFlowLog.preview(filename) + "\""
                         + " sizeBytes=" + file.getSize()
                         + " fileType=" + (fileType != null ? fileType.name() : "auto")));
-        AnalysisJobResponse resp =
-                analysisJobService.create(file, user.getUserId(), user.getTeamId(), fileType);
-        log.info(IngestFlowLog.msg(
-                KIND,
-                "07.accepted",
-                "jobId=" + resp.jobId() + " status=" + resp.status() + " fileType=" + resp.fileType()));
-        return resp;
+        // 不打 07.accepted：jobId/status/fileType 与 05.stored 完全重复
+        return analysisJobService.create(file, user.getUserId(), user.getTeamId(), fileType);
     }
 
     @GetMapping("/{id}")

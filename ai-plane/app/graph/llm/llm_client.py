@@ -10,7 +10,7 @@ from openai import AsyncOpenAI, RateLimitError
 
 from app.config import settings
 from app.graph.models.stream_event import StreamEvent, error_event, token_event
-from app.observability.logging import chat_msg, preview
+from app.observability.logging import chat_msg
 from app.observability.metrics import LLM_TTFB, observe_with_exemplar
 from app.observability.otel import get_tracer
 
@@ -39,12 +39,13 @@ async def stream_chat(
     """流式生成 token 事件；结束时 usage 写入 LlmStreamResult（通过 generator attribute）。"""
     mode = settings.effective_llm_mode()
     timeout = timeout_seconds or settings.llm_timeout_seconds
+    # promptChars 反映最终喂给模型的上下文体积，切块/历史条数改动后看这个字段
+    prompt_chars = sum(len(m.get("content", "")) for m in messages)
     logger.info(
         chat_msg(
-            "14.LLM模式",
+            "13.LLM",
             f"mode={mode} model={model} temp={temperature} "
-            f"msgCount={len(messages)} timeoutSec={timeout} "
-            f"user=\"{preview(user_message)}\"",
+            f"msgCount={len(messages)} promptChars={prompt_chars} timeoutSec={timeout}",
         )
     )
 
@@ -158,6 +159,9 @@ async def _openai_stream(
                         temperature=temperature,
                         stream=True,
                         stream_options={"include_usage": True},
+                        # 智谱 GLM-*-Flash 默认开启 thinking，会把输出耗在 reasoning_content，
+                        # 导致聊天 content 为空；对话场景关闭思考链。
+                        extra_body={"thinking": {"type": "disabled"}},
                     )
                     usage: dict[str, Any] = {}
                     async for chunk in stream:

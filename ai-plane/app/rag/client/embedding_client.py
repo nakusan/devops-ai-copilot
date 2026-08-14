@@ -67,7 +67,14 @@ class EmbeddingClient:
                 return [deterministic_embed(t, self._dim) for t in texts]
             span.set_attribute("rag.embed.mode", "api")
             resp = await self._client.embeddings.create(model=self._model, input=texts)
-            return [item.embedding for item in resp.data]
+            vectors = [item.embedding for item in resp.data]
+            for vec in vectors:
+                if len(vec) != self._dim:
+                    raise ValueError(
+                        f"embedding dim mismatch: got {len(vec)} expected {self._dim} "
+                        f"(model={self._model}); 请核对 EMBEDDING_DIM 与 DB vector(N)"
+                    )
+            return vectors
 
     async def embed_query(self, query: str) -> list[float]:
         vectors = await self.embed_batch([query])

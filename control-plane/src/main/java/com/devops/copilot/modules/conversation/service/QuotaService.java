@@ -55,7 +55,8 @@ public class QuotaService {
                     limit);
             throw new BizException(ErrorCode.QUOTA_EXCEEDED);
         }
-        log.info(
+        // 通过是每轮对话的常态，降到 DEBUG；配额的权威值由 08.结束 的 quotaAfter 承载
+        log.debug(
                 "[CHAT] step=02.配额校验 status=ok teamId={} used={} estimate={} limit={} remain={}",
                 teamId,
                 used,
@@ -66,10 +67,15 @@ public class QuotaService {
 
     /**
      * 聊天成功后累加实际 usage（来自 LLM 返回的 prompt+completion tokens）。
+     *
+     * <p>不打日志：累加结果由调用方并入 {@code 08.结束} 的 {@code quotaAfter}，
+     * 单独打一条会与终态行的 usageTotal 重复。
+     *
+     * @return 累加后的当日用量；未累加时返回 -1
      */
-    public void increaseUsage(Long teamId, long actualTokens) {
+    public long increaseUsage(Long teamId, long actualTokens) {
         if (actualTokens <= 0) {
-            return;
+            return -1;
         }
         String key = redisKey(teamId);
         Long after = redisTemplate.opsForValue().increment(key, actualTokens);
@@ -77,7 +83,7 @@ public class QuotaService {
         if (after != null && after.equals(actualTokens)) {
             redisTemplate.expire(key, keyTtl);
         }
-        log.info("[CHAT] step=07.配额累加 teamId={} delta={} after={}", teamId, actualTokens, after);
+        return after == null ? -1 : after;
     }
 
     public long currentUsage(Long teamId) {

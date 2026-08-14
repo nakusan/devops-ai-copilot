@@ -4,7 +4,7 @@ INSERT INTO agents (id, name, model, system_prompt, enable_rag, enable_mcp, rag_
 VALUES (
     1,
     '线上故障诊断助手',
-    'deepseek-chat',
+    'glm-4.7-flash',
     '你是企业内部 DevOps 故障排查助手。请基于检索到的私有知识与工具结果作答，不确定时明确说明。',
     TRUE,
     TRUE,

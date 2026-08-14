@@ -32,38 +32,14 @@ async def run_diagnosis_stream(
         if req.trace_id:
             span.set_attribute("copilot.trace_id", req.trace_id)
         try:
-            logger.info(
-                chat_msg(
-                    "11.图开始",
-                    f"sessionId={req.session_id} "
-                    f"user=\"{preview(req.user_message)}\"",
-                ),
-                extra={"trace_id": req.trace_id or "", "event": "chat.stream.graph_start"},
-            )
             graph = get_diagnosis_graph()
             state = await graph.ainvoke(state)  # type: ignore[assignment]
 
             intent = state.get("intent") or "direct"
             citations = state.get("citations") or []
-            chunks = state.get("retrieved_chunks") or []
             tool_calls = state.get("tool_calls") or []
-            analysis_summary = state.get("analysis_summary")
             llm_messages = state.get("llm_messages") or []
             span.set_attribute("intent", intent)
-
-            analysis_preview = preview(str(analysis_summary) if analysis_summary else "")
-            logger.info(
-                chat_msg(
-                    "12.图完成",
-                    f"sessionId={req.session_id} intent={intent} "
-                    f"citations={len(citations)} chunks={len(chunks)} "
-                    f"toolCalls={len(tool_calls)} "
-                    f"hasAnalysis={bool(analysis_summary)} "
-                    f"llmMessages={len(llm_messages)} "
-                    f"analysisPreview=\"{analysis_preview}\"",
-                ),
-                extra={"trace_id": req.trace_id or "", "event": "chat.stream.graph_done"},
-            )
 
             if citations:
                 yield citation_event(citations)
@@ -75,15 +51,6 @@ async def run_diagnosis_stream(
             cfg = req.agent_config
             messages = llm_messages
             had_error = False
-
-            logger.info(
-                chat_msg(
-                    "13.LLM开始",
-                    f"sessionId={req.session_id} model={cfg.model} "
-                    f"temp={cfg.temperature} msgCount={len(messages)}",
-                ),
-                extra={"trace_id": req.trace_id or ""},
-            )
 
             async for evt in stream_chat(
                 messages,
@@ -115,20 +82,12 @@ async def run_diagnosis_stream(
                     tool_calls=tool_calls,
                 )
             )
-            logger.info(
-                chat_msg(
-                    "15.完成",
-                    f"sessionId={req.session_id} durationMs={latency_ms} "
-                    f"intent={intent} usage={usage}",
-                ),
-                extra={"trace_id": req.trace_id or "", "event": "chat.stream.end"},
-            )
         except asyncio.CancelledError:
             yield error_event("CANCELLED", "生成已取消")
         except Exception as ex:  # noqa: BLE001
             logger.exception(
                 chat_msg(
-                    "15.错误",
+                    "14.异常",
                     f"sessionId={req.session_id} error=\"{preview(str(ex))}\"",
                 ),
                 extra={"trace_id": req.trace_id or ""},

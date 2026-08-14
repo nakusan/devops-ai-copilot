@@ -71,7 +71,6 @@ def shutdown_otel() -> None:
         return
     try:
         _provider.shutdown()
-        logger.info("otel TracerProvider shutdown complete")
     except Exception:  # noqa: BLE001
         logger.exception("otel TracerProvider shutdown failed")
     finally:

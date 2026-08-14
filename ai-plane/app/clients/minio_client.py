@@ -1,16 +1,16 @@
-"""MinIO 下载封装（同步 SDK，经 to_thread 供 async 调用）。"""
+"""MinIO 下载封装（同步 SDK，经 to_thread 供 async 调用）。
+
+不打日志：objectKey / 结果大小已由调用方的 [INGEST] 步骤日志覆盖。
+"""
 
 from __future__ import annotations
 
-import logging
 import tempfile
 from pathlib import Path
 
 from minio import Minio
 
 from app.config import settings
-
-logger = logging.getLogger(__name__)
 
 
 def _client() -> Minio:
@@ -37,9 +37,7 @@ def download_to_temp(object_key: str) -> Path:
         for chunk in response.stream(32 * 1024):
             tmp.write(chunk)
         tmp.flush()
-        path = Path(tmp.name)
-        logger.info("minio downloaded object_key=%s path=%s", object_key, path)
-        return path
+        return Path(tmp.name)
     finally:
         tmp.close()
         if response is not None:
@@ -59,4 +57,3 @@ def upload_bytes(object_key: str, data: bytes, content_type: str = "application/
         length=len(data),
         content_type=content_type,
     )
-    logger.info("minio uploaded object_key=%s bytes=%d", object_key, len(data))

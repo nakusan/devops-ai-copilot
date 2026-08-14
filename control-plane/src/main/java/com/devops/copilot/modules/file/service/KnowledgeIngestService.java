@@ -60,14 +60,8 @@ public class KnowledgeIngestService {
     public IngestResponse ingest(MultipartFile file, Long userId, Long teamId, String title) {
         uploadPolicyService.checkUploadRateLimit(userId, KIND);
         String filename = file.getOriginalFilename() == null ? "document.bin" : file.getOriginalFilename();
+        // 校验通过不单独打日志：userId/sizeBytes/filename 全部与 01.recv 重复，ext 并入 05.stored
         String ext = uploadPolicyService.validateKnowledgeUpload(filename, file.getSize());
-        log.info(IngestFlowLog.msg(
-                KIND,
-                "03.validated",
-                "userId=" + userId
-                        + " ext=" + ext
-                        + " sizeBytes=" + file.getSize()
-                        + " filename=\"" + IngestFlowLog.preview(filename) + "\""));
 
         UUID documentId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
@@ -107,14 +101,17 @@ public class KnowledgeIngestService {
         job.setUpdatedAt(now);
         ingestJobMapper.insert(job);
 
+        // 承载 MinIO objectKey 与校验结果，替代原 03.validated / 04.minio_upload / 05.db_pending 三条
         log.info(IngestFlowLog.msg(
                 KIND,
-                "05.db_pending",
+                "05.stored",
                 "documentId=" + documentId
                         + " jobId=" + jobId
                         + " objectKey=" + objectKey
-                        + " title=\"" + IngestFlowLog.preview(docTitle) + "\""
-                        + " mimeType=" + mimeType));
+                        + " ext=" + ext
+                        + " mimeType=" + mimeType
+                        + " sizeBytes=" + file.getSize()
+                        + " status=PENDING"));
 
         KnowledgeIngestEvent event = new KnowledgeIngestEvent();
         event.setEventId(UUID.randomUUID());
@@ -133,11 +130,8 @@ public class KnowledgeIngestService {
             job.setUpdatedAt(OffsetDateTime.now());
             ingestJobMapper.updateById(job);
         } catch (RuntimeException ex) {
+            // markFailed 已打 08.failed（同样带 documentId/jobId/error），不再重复
             markFailed(job, doc, "KAFKA_PUBLISH_FAILED");
-            log.warn(IngestFlowLog.msg(
-                    KIND,
-                    "08.kafka_fail",
-                    "documentId=" + documentId + " jobId=" + jobId + " error=\"KAFKA_PUBLISH_FAILED\""));
             throw new BizException(ErrorCode.INGEST_PUBLISH_FAILED);
         }
 

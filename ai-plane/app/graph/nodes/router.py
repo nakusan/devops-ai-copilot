@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from app.graph.state import DiagnosisState
-from app.observability.logging import chat_msg, preview
+from app.observability.logging import chat_msg
 from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
@@ -74,13 +74,9 @@ def router_node(state: DiagnosisState) -> dict[str, Any]:
             intent = "direct"
 
         span.set_attribute("graph.intent", intent)
+        # enableRag/enableMcp 与用户原文已在 10.接收请求 打过，此处不再重复
         logger.info(
-            chat_msg(
-                "11.路由",
-                f"intent={intent} ragHit={rag_hit} toolHit={tool_hit} "
-                f"enableRag={enable_rag} enableMcp={enable_mcp} "
-                f"user=\"{preview(msg)}\"",
-            ),
+            chat_msg("11.路由", f"intent={intent} ragHit={rag_hit} toolHit={tool_hit}"),
             extra={"trace_id": state.get("trace_id") or ""},
         )
         # TODO(Phase-5/V1.1): LLM intent 分类 — MVP 规则优先省成本 — 规则未命中时调小模型

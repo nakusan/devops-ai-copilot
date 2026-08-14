@@ -84,24 +84,12 @@ public class ChatService {
     public void streamChat(
             UUID sessionId, ChatRequest req, UserPrincipal principal, SseEmitter emitter) {
         SessionEntity session = sessionService.requireOwnedSession(sessionId, principal.getUserId(), false);
-        log.info(ChatFlowLog.msg(
-                "01.会话信息获取",
-                "sessionId=" + sessionId
-                        + " agentId=" + session.getAgentId()
-                        + " title=\"" + ChatFlowLog.preview(session.getTitle()) + "\""));
 
         long estimate = Math.max(1, req.getContent().length() / Math.max(1, chatProperties.getEstimateCharsPerToken()));
         quotaService.assertWithinQuota(principal.getTeamId(), estimate);
 
         MessageService.SaveUserResult saved = messageService.saveUserMessage(sessionId, req);
         touchSession(session);
-        log.info(ChatFlowLog.msg(
-                "03.用户消息保存",
-                "messageId=" + saved.message().getId()
-                        + " created=" + saved.created()
-                        + " clientMessageId=" + saved.message().getClientMessageId()
-                        + " chars=" + (saved.message().getContent() == null ? 0 : saved.message().getContent().length())
-                        + " content=\"" + ChatFlowLog.preview(saved.message().getContent()) + "\""));
 
         // 幂等：已有完整 assistant 则直接回放 done，避免重复烧模型/Mock
         if (!saved.created()) {
@@ -131,9 +119,12 @@ public class ChatService {
         List<InternalChatRequest.ChatMessageDto> history =
                 messageService.loadHistory(sessionId, historyLimit, saved.message().getId());
 
+        // 落库结果 + Agent 上下文合成一条：两者之间无分支，分开打只是把同一批字段拆成两行
         log.info(ChatFlowLog.msg(
-                "04.准备上下文",
-                "agentId=" + session.getAgentId()
+                "03.准备",
+                "userMessageId=" + saved.message().getId()
+                        + " created=" + saved.created()
+                        + " agentId=" + session.getAgentId()
                         + " model=" + agentConfig.getModel()
                         + " enableRag=" + agentConfig.isEnableRag()
                         + " enableMcp=" + agentConfig.isEnableMcp()
@@ -155,12 +146,7 @@ public class ChatService {
         long startedAt = System.currentTimeMillis();
         AtomicLong startedAtRef = new AtomicLong(startedAt);
         chatMetrics.recordStart();
-        log.info(ChatFlowLog.msg(
-                "05.调用AI模型",
-                "sessionId=" + sessionId
-                        + " historyCount=" + history.size()
-                        + " userChars=" + req.getContent().length()));
-
+        // 出站由 AiPlaneClient 的 04.出站 记录，此处不再重复 sessionId/historyCount
         Disposable subscription = aiPlaneClient.streamChat(internal)
                 .publishOn(Schedulers.boundedElastic())
                 .subscribe(
@@ -195,40 +181,17 @@ public class ChatService {
             StreamEvent evt) {
         try {
             switch (evt.getType()) {
+                // token / citation / done 均不逐个打日志：条数与 usage 汇总进 08.结束，
+                // 明细在 Python 侧已有结构化日志，逐事件打印只会把异常淹掉。
                 case "token" -> {
                     if (evt.getText() != null) {
                         buffer.append(evt.getText());
-                        int n = tokenEvents.incrementAndGet();
-                        // 首个 token + 每 20 个打一次，避免刷屏
-                        if (n == 1 || n % 20 == 0) {
-                            log.info(ChatFlowLog.msg(
-                                    "06.接收Token",
-                                    "n=" + n
-                                            + " bufChars=" + buffer.length()
-                                            + " chunk=\"" + ChatFlowLog.preview(evt.getText()) + "\""));
-                        }
+                        tokenEvents.incrementAndGet();
                         sseBridge.send(emitter, "token", Map.of("text", evt.getText()));
                     }
                 }
-                case "citation" -> {
-                    JsonNode data = evt.getData();
-                    int chunkCount = 0;
-                    if (data != null && data.has("citations") && data.get("citations").isArray()) {
-                        chunkCount = data.get("citations").size();
-                    } else if (data != null && data.has("chunks") && data.get("chunks").isArray()) {
-                        chunkCount = data.get("chunks").size();
-                    }
-                    log.info(ChatFlowLog.msg(
-                            "06.接收引用",
-                            "chunks=" + chunkCount + " data=" + ChatFlowLog.preview(String.valueOf(data))));
-                    sseBridge.send(emitter, "citation", evt.getData());
-                }
-                case "done" -> {
-                    doneRef.set(evt.getDone());
-                    log.info(ChatFlowLog.msg(
-                            "06.上游完成",
-                            "payload=" + ChatFlowLog.preview(String.valueOf(evt.getDone()))));
-                }
+                case "citation" -> sseBridge.send(emitter, "citation", evt.getData());
+                case "done" -> doneRef.set(evt.getDone());
                 case "error" -> {
                     if (!finished.compareAndSet(false, true)) {
                         return;
@@ -282,23 +245,18 @@ public class ChatService {
                 }
             }
             Message assistant = messageService.saveAssistantMessage(sessionId, buffer.toString(), metadata);
-            if (usageTotal > 0) {
-                quotaService.increaseUsage(teamId, usageTotal);
-            }
+            long quotaAfter = usageTotal > 0 ? quotaService.increaseUsage(teamId, usageTotal) : -1;
             chatMetrics.recordSuccess(durationMs);
-            log.info(ChatFlowLog.msg(
-                    "07.助手消息保存",
-                    "messageId=" + assistant.getId()
-                            + " chars=" + buffer.length()
-                            + " tokenEvents=" + tokenEvents.get()
-                            + " usageTotal=" + usageTotal
-                            + " content=\"" + ChatFlowLog.preview(buffer.toString()) + "\""));
+            // 落库、配额、结束原来是三条日志，字段大量重叠，合成唯一终态行
             log.info(ChatFlowLog.msg(
                     "08.结束",
                     "status=success sessionId=" + sessionId
                             + " durationMs=" + durationMs
                             + " assistantMessageId=" + assistant.getId()
-                            + " usageTotal=" + usageTotal));
+                            + " answerChars=" + buffer.length()
+                            + " tokenEvents=" + tokenEvents.get()
+                            + " usageTotal=" + usageTotal
+                            + " quotaAfter=" + quotaAfter));
             sseBridge.send(emitter, "done", Map.of(
                     "messageId", assistant.getId().toString(),
                     "usage", metadata.getOrDefault("usage", Map.of())));

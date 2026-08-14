@@ -8,7 +8,7 @@ from typing import Any
 from app.graph.state import DiagnosisState
 from app.mcp.client import mcp_client
 from app.mcp.resolver import resolve_tool_calls
-from app.observability.logging import chat_msg, preview
+from app.observability.logging import chat_msg
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +47,12 @@ async def tool_node(state: DiagnosisState) -> dict[str, Any]:
             }
         )
 
+    # 逐个工具的 ok/err 足够定位问题；返回值全文由 MCP span 承载，不进日志
     summary = [
         f"{c.get('tool')}={'ok' if c.get('success') else 'err'}" for c in tool_calls
     ]
     logger.info(
-        chat_msg(
-            "11.工具",
-            f"calls={len(results)} summary={summary} "
-            f"preview=\"{preview(str(results))}\"",
-        ),
+        chat_msg("12.工具", f"calls={len(results)} summary={summary}"),
         extra={"trace_id": trace_id or "", "event": "mcp.tool_node.done"},
     )
     return {"tool_results": results, "tool_calls": tool_calls}

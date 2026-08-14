@@ -15,7 +15,8 @@ class AgentConfig(BaseModel):
     enable_rag: bool = Field(default=True, alias="enableRag")
     enable_mcp: bool = Field(default=True, alias="enableMcp")
     rag_top_k: int = Field(default=5, alias="ragTopK")
-    rag_score_threshold: float = Field(default=0.7, alias="ragScoreThreshold")
+    # None = Agent 未覆盖，回落 settings.rag_score_threshold（唯一默认值来源）
+    rag_score_threshold: float | None = Field(default=None, alias="ragScoreThreshold")
     temperature: float = 0.2
     max_history_messages: int = Field(default=20, alias="maxHistoryMessages")
     mcp_servers: list[str] = Field(default_factory=list, alias="mcpServers")

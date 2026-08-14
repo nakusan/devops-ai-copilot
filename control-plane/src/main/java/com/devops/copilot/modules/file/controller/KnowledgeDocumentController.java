@@ -49,14 +49,8 @@ public class KnowledgeDocumentController {
                         + " filename=\"" + IngestFlowLog.preview(filename) + "\""
                         + " sizeBytes=" + file.getSize()
                         + " title=\"" + IngestFlowLog.preview(title) + "\""));
-        IngestResponse resp = knowledgeIngestService.ingest(file, user.getUserId(), user.getTeamId(), title);
-        log.info(IngestFlowLog.msg(
-                KIND,
-                "07.accepted",
-                "documentId=" + resp.documentId()
-                        + " jobId=" + resp.jobId()
-                        + " status=" + resp.status()));
-        return resp;
+        // 不打 07.accepted：documentId/jobId/status 与 05.stored 完全重复
+        return knowledgeIngestService.ingest(file, user.getUserId(), user.getTeamId(), title);
     }
 
     @GetMapping("/{id}")

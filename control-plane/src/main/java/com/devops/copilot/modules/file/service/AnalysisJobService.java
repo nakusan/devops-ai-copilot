@@ -67,15 +67,7 @@ public class AnalysisJobService {
                 ? fileTypeOverride
                 : EXT_TO_TYPE.getOrDefault(ext, AnalysisFileType.APP_LOG);
 
-        log.info(IngestFlowLog.msg(
-                KIND,
-                "03.validated",
-                "userId=" + userId
-                        + " ext=" + ext
-                        + " fileType=" + fileType.name()
-                        + " sizeBytes=" + file.getSize()
-                        + " filename=\"" + IngestFlowLog.preview(filename) + "\""));
-
+        // 校验通过不单独打日志：userId/sizeBytes/filename 与 01.recv 重复，ext/fileType 并入 05.stored
         UUID jobId = UUID.randomUUID();
         String objectKey = "analysis/" + jobId + "/source." + ext;
         OffsetDateTime now = OffsetDateTime.now();
@@ -99,12 +91,15 @@ public class AnalysisJobService {
         job.setUpdatedAt(now);
         analysisJobMapper.insert(job);
 
+        // 承载 MinIO objectKey 与校验结果，替代原 03.validated / 04.minio_upload / 05.db_pending 三条
         log.info(IngestFlowLog.msg(
                 KIND,
-                "05.db_pending",
+                "05.stored",
                 "jobId=" + jobId
                         + " objectKey=" + objectKey
+                        + " ext=" + ext
                         + " fileType=" + fileType.name()
+                        + " sizeBytes=" + file.getSize()
                         + " status=PENDING"));
 
         AnalysisIngestEvent event = new AnalysisIngestEvent();
@@ -202,9 +197,11 @@ public class AnalysisJobService {
         analysisJobMapper.updateById(job);
 
         if (req.getStatus() != null && !req.getStatus().equals(oldStatus)) {
-            log.info(IngestFlowLog.msg(
+            // 原 16.status_patch + 17.end 是同一次变迁的两条日志，字段全重；
+            // 合成一条，终态 FAILED 时升级为 WARN 保留告警能力。
+            String message = IngestFlowLog.msg(
                     KIND,
-                    "16.status_patch",
+                    "16.status",
                     "jobId=" + jobId
                             + " " + oldStatus + "→" + req.getStatus()
                             + (req.getResultSummary() != null
@@ -212,19 +209,11 @@ public class AnalysisJobService {
                                     : "")
                             + (req.getErrorMessage() != null
                                     ? " error=\"" + IngestFlowLog.preview(req.getErrorMessage()) + "\""
-                                    : "")));
-            if (JobStatus.COMPLETED.name().equals(req.getStatus())) {
-                log.info(IngestFlowLog.msg(
-                        KIND,
-                        "17.end",
-                        "jobId=" + jobId
-                                + " status=COMPLETED"
-                                + " summary=\"" + IngestFlowLog.preview(job.getResultSummary()) + "\""));
-            } else if (JobStatus.FAILED.name().equals(req.getStatus())) {
-                log.warn(IngestFlowLog.msg(
-                        KIND,
-                        "17.end",
-                        "jobId=" + jobId + " status=FAILED error=\"" + IngestFlowLog.preview(job.getErrorMessage()) + "\""));
+                                    : ""));
+            if (JobStatus.FAILED.name().equals(req.getStatus())) {
+                log.warn(message);
+            } else {
+                log.info(message);
             }
         }
 

@@ -28,7 +28,6 @@ def _req(user_message: str, *, enable_rag: bool = True) -> InternalChatRequest:
             enableRag=enable_rag,
             enableMcp=True,
             ragTopK=5,
-            ragScoreThreshold=0.7,
             temperature=0.2,
         ),
         userContext=UserContext(userId=1, teamId=1),

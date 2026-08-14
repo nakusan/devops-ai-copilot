@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     llm_mode: Literal["mock", "openai"] = "mock"
     llm_api_key: str | None = None
     llm_base_url: str | None = None
-    llm_model: str = "deepseek-chat"
+    llm_model: str = "glm-4.7-flash"
     llm_timeout_seconds: int = 60
     # Mock 流每个 token 间隔（毫秒），便于观察 SSE
     llm_mock_delay_ms: int = 30
@@ -36,10 +36,14 @@ class Settings(BaseSettings):
     # --- Embedding / RAG（W7）---
     embedding_api_key: str | None = None
     embedding_base_url: str | None = None
-    embedding_model: str = "text-embedding-v3"
-    embedding_dim: int = 1536
-    embedding_model_version: str = "v1"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
+    embedding_model_version: str = "bge-m3"
     database_readonly_url: str | None = None
+    # 检索命中阈值的唯一默认值来源。Agent 可通过 config_json.ragScoreThreshold 覆盖。
+    # 0.45 按 bge-m3 实测标定：相关 chunk 约 0.62，无关约 0.38。
+    # 换 Embedding 模型必须重新标定，不同模型的余弦分布差异很大。
+    rag_score_threshold: float = 0.45
 
     # --- Java Internal API（Python → Java 回调，Phase 4）---
     java_internal_base_url: str = "http://localhost:8080"
@@ -61,8 +65,10 @@ class Settings(BaseSettings):
     minio_secure: bool = False
 
     # --- RAG 切块（W9）---
-    chunk_size: int = 2000  # 约 512 tokens（字符近似）
-    chunk_overlap: int = 200
+    # 中文按字符计约 1 字 ≈ 0.7 token，512 字符 ≈ 360 token，对齐 6.4 设计。
+    # 调整后必须重新入库，已有 chunk 不会自动重切。
+    chunk_size: int = 512
+    chunk_overlap: int = 64
     embedding_batch_size: int = 32
 
     # --- Analysis MVP（W8）---
@@ -98,6 +104,14 @@ class Settings(BaseSettings):
     def effective_embedding_api_key(self) -> str | None:
         """Embedding 优先用独立 Key，否则复用 LLM Key。"""
         return self.embedding_api_key or self.llm_api_key
+
+    def effective_rag_score_threshold(self, override: float | None = None) -> float:
+        """Agent 显式配置优先，否则用全局默认。
+
+        解析逻辑集中在此，调用方不得再写兜底字面量，
+        否则 Java / Pydantic / 节点各持一份默认值会再次漂移。
+        """
+        return self.rag_score_threshold if override is None else float(override)
 
 
 settings = Settings()

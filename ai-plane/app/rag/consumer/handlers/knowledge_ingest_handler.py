@@ -57,16 +57,8 @@ async def handle_knowledge_ingest(event: KnowledgeIngestEvent, *, retry_count: i
     with _tracer.start_as_current_span("ingest.process") as span:
         span.set_attribute("ingest.job_id", str(event.job_id))
         try:
+            # 下载不单独打日志：objectKey 已在 11.process_start，失败会走 17.end
             tmp = await asyncio.to_thread(download_to_temp, event.object_key)
-            logger.info(
-                ingest_msg(
-                    _KIND,
-                    "12.download",
-                    f"jobId={event.job_id} objectKey={event.object_key} tmp={tmp}",
-                ),
-                extra={"trace_id": trace},
-            )
-
             raw_text = await asyncio.to_thread(parse_document, tmp, event.mime_type)
             text = clean(raw_text)
             if not text.strip():

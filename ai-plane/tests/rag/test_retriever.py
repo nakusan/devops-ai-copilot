@@ -29,7 +29,7 @@ async def test_retriever_filters_by_score_threshold() -> None:
         ),
     ]
     with (
-        patch.object(svc._embedder, "embed_query", new=AsyncMock(return_value=[0.1] * 1536)),
+        patch.object(svc._embedder, "embed_query", new=AsyncMock(return_value=[0.1] * 1024)),
         patch.object(svc._store, "similarity_search", new=AsyncMock(return_value=hits)),
     ):
         result = await svc.retrieve("query", top_k=5, score_threshold=0.7, team_id=1)

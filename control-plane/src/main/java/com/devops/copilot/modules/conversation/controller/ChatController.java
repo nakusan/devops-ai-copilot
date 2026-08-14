@@ -40,8 +40,9 @@ public class ChatController {
     public SseEmitter chat(
             @PathVariable UUID sessionId, @Valid @RequestBody ChatRequest request) {
         UserPrincipal principal = SecurityUtils.currentUser();
+        // 全链路唯一一处打用户原文，后续步骤不再重复
         log.info(ChatFlowLog.msg(
-                "01.SSE聊天入口",
+                "01.接收",
                 "sessionId=" + sessionId
                         + " userId=" + principal.getUserId()
                         + " teamId=" + principal.getTeamId()

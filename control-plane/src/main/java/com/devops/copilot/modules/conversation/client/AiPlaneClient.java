@@ -55,14 +55,11 @@ public class AiPlaneClient {
         String token = serviceTokenProvider.issue();
         String traceId = request.getTraceId() != null ? request.getTraceId() : TraceIds.current();
 
-        int historyCount = request.getHistory() == null ? 0 : request.getHistory().size();
-        String model = request.getAgentConfig() != null ? request.getAgentConfig().getModel() : null;
+        // 用户原文与 model/historyCount 已由 01.接收 / 03.准备 记录，此处只标记出站动作
         log.info(ChatFlowLog.msg(
-                "05.出站HTTP",
+                "04.出站",
                 "sessionId=" + request.getSessionId()
-                        + " model=" + model
-                        + " historyCount=" + historyCount
-                        + " user=\"" + ChatFlowLog.preview(request.getUserMessage()) + "\""));
+                        + " userChars=" + (request.getUserMessage() == null ? 0 : request.getUserMessage().length())));
 
         return aiPlaneWebClient.post()
                 .uri("/internal/v1/chat/stream")
@@ -77,14 +74,14 @@ public class AiPlaneClient {
                 .filter(line -> line != null && !line.isBlank())
                 .map(this::parseLine)
                 .doOnError(err -> log.warn(ChatFlowLog.msg(
-                        "05.出站HTTP失败",
+                        "04.出站失败",
                         "sessionId=" + request.getSessionId()
                                 + " error=\"" + ChatFlowLog.preview(err.toString()) + "\"")));
     }
 
     public void cancel(String sessionId, String traceId) {
         try {
-            log.info(ChatFlowLog.msg("08.取消上游", "sessionId=" + sessionId));
+            // 调用方 ChatService 已打 08.取消，此处只在失败时留痕
             aiPlaneWebClient.post()
                     .uri("/internal/v1/chat/cancel")
                     .contentType(MediaType.APPLICATION_JSON)
