@@ -1,7 +1,7 @@
 """Phase 2 Mock 流式生成器：不调真实 LLM，只验证 NDJSON 管道。
 
 将 user_message 按片切分，逐片 yield token，最后发 done（含假 usage）。
-Week 6 起由 LangGraph + 真 LLM 替换本模块。
+Week 6 起由 ReAct Orchestrator + 真 LLM 替换本模块。
 """
 
 import asyncio

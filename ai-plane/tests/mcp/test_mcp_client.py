@@ -1,4 +1,4 @@
-"""MCP Client / 白名单 / resolver 测试。"""
+"""MCP Client / 白名单测试（Agent 主路径不再使用关键词 resolver）。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.mcp.client import mcp_client
-from app.mcp.resolver import resolve_tool_calls
 from app.mcp.whitelist import (
     ReadonlySqlArgs,
     ToolNotAllowedError,
@@ -28,13 +27,6 @@ def test_prom_query_rejects_freeform() -> None:
 def test_readonly_sql_rejects_delete() -> None:
     with pytest.raises(ValidationError):
         ReadonlySqlArgs(sql="DELETE FROM users")
-
-
-def test_resolver_connection_keyword() -> None:
-    calls = resolve_tool_calls("当前数据库连接数正常吗？", {"mcp_servers": ["prometheus"]})
-    assert len(calls) == 1
-    assert calls[0].tool == "prometheus_query"
-    assert calls[0].arguments["query"] == "db_connections"
 
 
 @pytest.mark.asyncio

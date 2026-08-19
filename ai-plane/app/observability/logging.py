@@ -2,14 +2,12 @@
 
 约定：`[CHAT] step=序号.中文步骤名 key=value ...`，文本字段用 preview 截断。
 
-聊天链路每轮对话固定 4~5 条 INFO，一个步骤号只允许一处打印：
+聊天链路每轮对话固定若干条 INFO，一个步骤号只允许一处打印：
 
     10.接收请求  api/chat.py          入口参数 + 用户原文（全链路唯一一次打原文）
-    11.路由      nodes/router.py      intent 判定结果
     12.检索      rag/retrieval        命中数 + 原始分数（未命中时升为 WARN）
-    12.工具      nodes/tool.py        各工具 ok/err
-    12.分析      nodes/analysis.py    最近一次分析摘要
-    13.LLM       graph/llm            模型 / 上下文体积
+    12.工具      graph/orchestrator   本轮 tool 名汇总（ReAct）
+    13.LLM       graph/llm            模型 / 上下文体积（plan 或 stream）
     14.完成      api/chat.py          终态汇总：耗时、TTFB、token、usage
 
 新增日志前先确认字段没在上述步骤里出现过：字段重复比日志条数多更难排障，

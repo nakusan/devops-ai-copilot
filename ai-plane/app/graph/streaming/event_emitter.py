@@ -1,8 +1,8 @@
-"""流式事件辅助 — state → citation / done 载荷。"""
+"""流式事件辅助 — citation / done / tool 载荷。"""
 
 from typing import Any
 
-from app.graph.models.stream_event import StreamEvent
+from app.graph.models.stream_event import StreamEvent, tool_event
 
 
 def citation_event(citations: list[dict[str, Any]]) -> StreamEvent:
@@ -28,3 +28,6 @@ def build_done_payload(
         "citations": citations,
         "toolCalls": tool_calls,
     }
+
+
+__all__ = ["build_done_payload", "citation_event", "tool_event"]

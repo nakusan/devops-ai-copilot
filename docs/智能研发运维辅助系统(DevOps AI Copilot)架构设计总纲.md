@@ -54,7 +54,7 @@
 
 * **定位**：AI 编排与计算大脑。
 * **核心职责**：
-* 有向无环图 (Directed Acyclic Graph, DAG) 状态机维护（基于 LangGraph，硬编码图结构）。
+* ReAct 工具循环（LLM function calling）：模型决定检索 / MCP / 分析任务调用，编排器执行并回灌，最终流式回答。
 * RAG 数据管道（文档解析、切块分发、向量化计算）。
 * 外部工具与系统挂载（MCP Client）。
 * 对接兼容 OpenAI 标准的模型 API（如 DeepSeek/Qwen）。
@@ -101,7 +101,7 @@
 | **异步流转** | **文件与调度模块** | Java/Kafka/MinIO | 大文件的断点续传/预签名直传；Kafka 生产者确认与消费者死信队列 (DLQ) 机制。 |
 | **AI 计算** | **知识检索模块 (RAG)** | Python/pgvector | 文档清洗解析；Token 切块算法；高维向量余弦相似度搜索。 |
 | **AI 计算** | **大文件分析模块** | Python/Kafka | 消费 `analysis.ingest.v1`；MVP 关键字解析；更新 `analysis_jobs`。 |
-| **AI 计算** | **智能体编排模块** | Python/LangGraph | 硬编码诊断图；支持 RAG∥MCP 并行；对话上下文以 PG 为准 |
+| **AI 计算** | **智能体编排模块** | Python/ReAct | LLM function calling 多轮工具；RAG/MCP/分析由模型选路；对话上下文以 PG 为准 |
 | **外部通信** | **工具挂载模块 (MCP)** | Python/MCP | MCP 客户端实现，标准化对接外部只读数据库或监控 API 提供实时状态。 |
 | **可观测性** | **遥测监控模块** | OTel/Prometheus | 跨越双栈的 HTTP 头 Trace ID 注入；JVM/Python GC 耗时及 API QPS 大盘展示。 |
 
@@ -135,7 +135,7 @@
 ### 阶段五：可观测体系与工具挂载 (Weeks 10-11)
 
 * **Week 10**：引入 OpenTelemetry 探针；实现跨越 HTTP、JDBC、Redis 与 Kafka 的统一分布式调用链分析。
-* **Week 11**：在 LangGraph 诊断图中硬编码 `ToolNode`；利用 MCP 协议对接一个外部 Mock 数据库，验证系统实时数据抓取能力。
+* **Week 11**：Orchestrator ReAct + MCP Mock；LLM function calling 验证实时指标与知识检索多轮诊断。
 
 ### 阶段六：CI/CD 与容器化交付 (Week 12)
 

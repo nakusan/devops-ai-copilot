@@ -7,7 +7,7 @@ uv sync --extra dev
 # 密钥需与 control-plane 的 copilot.service-token.secret 一致
 export SERVICE_TOKEN_SECRET=dev-only-service-token-secret-change-me
 
-# 1) HTTP 服务（聊天 / LangGraph）
+# 1) HTTP 服务（聊天 / ReAct Orchestrator）
 uv run uvicorn app.main:app --reload --port 8000
 
 # 2) 异步 Worker（另开终端；依赖 Kafka）

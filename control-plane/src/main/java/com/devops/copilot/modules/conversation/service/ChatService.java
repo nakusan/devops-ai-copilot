@@ -191,6 +191,11 @@ public class ChatService {
                     }
                 }
                 case "citation" -> sseBridge.send(emitter, "citation", evt.getData());
+                case "tool" -> {
+                    if (evt.getData() != null) {
+                        sseBridge.send(emitter, "tool", evt.getData());
+                    }
+                }
                 case "done" -> doneRef.set(evt.getDone());
                 case "error" -> {
                     if (!finished.compareAndSet(false, true)) {

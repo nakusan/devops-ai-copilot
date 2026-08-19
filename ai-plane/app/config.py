@@ -91,8 +91,12 @@ class Settings(BaseSettings):
     # 采样率：1.0=全采样；<1 时用 TraceIdRatioBased（ParentBased 尊重上游决策）
     otel_sample_rate: float = 1.0
 
-    # --- Chat HTTP 后端（W11：默认走 LangGraph orchestrator；可回退 mock）---
+    # --- Chat HTTP 后端（默认 ReAct orchestrator；可回退 Phase2 mock 流）---
     chat_backend: Literal["orchestrator", "mock"] = "orchestrator"
+    # Agent 工具循环：规划轮最多几轮；打满后强制无 tools 生成最终答案
+    agent_max_tool_rounds: int = 5
+    # 单条 tool 结果写入 messages 前截断，避免撑爆 context
+    tool_result_max_chars: int = 4000
 
     # --- MCP（W11）---
     mcp_enabled: bool = True

@@ -96,6 +96,24 @@ class JavaInternalClient:
                 return None
             return resp.json()
 
+    async def list_analysis_jobs(self, user_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
+        """列出用户最近分析任务（Agent list_analysis_jobs）。"""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{self._base}/internal/v1/analysis-jobs",
+                headers=self._headers(),
+                params={"userId": user_id, "latest": "false", "limit": max(1, min(limit, 20))},
+            )
+            resp.raise_for_status()
+            if not resp.content:
+                return []
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict) and isinstance(data.get("items"), list):
+                return data["items"]
+            return []
+
     async def patch_analysis_job(
         self,
         job_id: UUID,

@@ -1,81 +1,34 @@
-"""Prompt 构建 — 将 RAG/Tool/Analysis 上下文拼进 LLM messages。"""
+"""组装 Agent ReAct 初始 messages。"""
 
-import json
+from __future__ import annotations
+
 from typing import Any
 
-from app.graph.state import DiagnosisState
+_AGENT_RULES = """
+你是运维诊断助手。必须遵守：
+1. 需要内部知识时调用 retrieve_knowledge；问候/闲聊不要检索。
+2. 需要实时指标时调用 prometheus_query 或 readonly_sql；参数必须落在工具 schema 内。
+3. 需要用户上传文件的分析结果时，先 list_analysis_jobs 再 get_analysis_job。
+4. 可多轮调用工具；信息足够后直接用中文回答用户。
+5. 仅基于工具结果与对话上下文作答，不得编造指标或文档内容；不足时明确说明。
+6. 引用知识时使用 [n] 标注（n 与检索结果顺序一致）。
+""".strip()
 
-_GROUNDING_RULES = """
-你必须遵守：
-1. 仅基于提供的【内部知识】【实时数据】【分析结果】回答，不得编造。
-2. 若上下文不足，明确说明「内部资料未覆盖」。
-3. 引用知识时使用 [n] 标注。
-"""
 
-
-def build_messages(state: DiagnosisState) -> list[dict[str, str]]:
-    """模式 A：图跑完后由 orchestrator 调用，生成 OpenAI chat messages。"""
-    cfg = state.get("agent_config") or {}
-    system = (cfg.get("system_prompt") or "").strip()
-    system = f"{system}\n{_GROUNDING_RULES}".strip()
-
-    context_blocks: list[str] = []
-
-    chunks = state.get("retrieved_chunks") or []
-    if not chunks:
-        context_blocks.append("（无额外内部知识检索结果）")
-    else:
-        for i, chunk in enumerate(chunks, 1):
-            title = chunk.get("document_title", "未知来源")
-            score = chunk.get("score", 0.0)
-            content = chunk.get("content", "")
-            context_blocks.append(f"[{i}] (来源: {title}, score={score:.2f})\n{content}")
-
-    for tool in state.get("tool_results") or []:
-        tool_name = tool.get("tool", "unknown")
-        # MCP 失败降级：明确告知模型「无法获取实时数据」，避免编造指标
-        if tool.get("success") is False or tool.get("error"):
-            err = tool.get("error") or (tool.get("result") or {}).get("error") or "unknown"
-            context_blocks.append(
-                f"【实时数据】{tool_name}: 调用失败（{err}）。"
-                "请如实告知用户暂时无法获取实时监控数据，不要编造数值。"
-            )
-            continue
-        result_json = json.dumps(tool.get("result", {}), ensure_ascii=False)
-        context_blocks.append(f"【实时数据】{tool_name}: {result_json}")
-
-    analysis_summary = state.get("analysis_summary")
-    if analysis_summary:
-        context_blocks.append(f"【文件分析结果】\n{analysis_summary}")
-    elif state.get("intent") == "analysis":
-        context_blocks.append("【文件分析结果】（暂无已完成的上传分析任务）")
-
-    context_text = "\n\n".join(context_blocks)
-
-    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-    for h in state.get("history") or []:
-        messages.append({"role": h["role"], "content": h["content"]})
-    messages.append(
-        {
-            "role": "user",
-            "content": f"上下文：\n{context_text}\n\n用户问题：{state.get('user_message', '')}",
-        }
-    )
+def build_agent_messages(
+    *,
+    system_prompt: str,
+    history: list[dict[str, str]],
+    user_message: str,
+) -> list[dict[str, Any]]:
+    """system + history + 本轮 user。后续 tool 轮由 orchestrator 追加。"""
+    system = (system_prompt or "").strip()
+    system = f"{system}\n\n{_AGENT_RULES}".strip() if system else _AGENT_RULES
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    for h in history:
+        role = h.get("role") or "user"
+        content = h.get("content") or ""
+        if role in {"user", "assistant", "system"} and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_message})
     return messages
-
-
-def build_citations_from_state(state: DiagnosisState) -> list[dict[str, Any]]:
-    """从 state 提取 citations（优先已汇总的 citations 字段）。"""
-    citations = state.get("citations")
-    if citations:
-        return list(citations)
-    return []
-
-def build_tool_calls_from_state(state: DiagnosisState) -> list[dict[str, Any]]:
-    tool_calls = state.get("tool_calls")
-    if tool_calls:
-        return list(tool_calls)
-    return [
-        {"tool": t.get("tool"), "result": t.get("result")}
-        for t in (state.get("tool_results") or [])
-    ]

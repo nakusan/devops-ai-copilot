@@ -23,6 +23,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -177,7 +178,7 @@ public class AnalysisJobService {
     }
 
     /**
-     * Internal：按 userId 取最近一次 COMPLETED（LangGraph AnalysisLookupNode）。
+     * Internal：按 userId 取最近一次 COMPLETED（Agent get_analysis_job 无 id 时兜底）。
      */
     public AnalysisJobResponse getLatestCompleted(Long userId) {
         AnalysisJob job = analysisJobMapper.selectOne(new LambdaQueryWrapper<AnalysisJob>()
@@ -186,6 +187,18 @@ public class AnalysisJobService {
                 .orderByDesc(AnalysisJob::getUpdatedAt)
                 .last("LIMIT 1"));
         return job == null ? null : toResponse(job);
+    }
+
+    /**
+     * Internal：用户最近 N 条分析任务（Agent list_analysis_jobs）。
+     */
+    public List<AnalysisJobResponse> listRecent(Long userId, int limit) {
+        int capped = Math.min(Math.max(limit, 1), 20);
+        List<AnalysisJob> jobs = analysisJobMapper.selectList(new LambdaQueryWrapper<AnalysisJob>()
+                .eq(AnalysisJob::getUserId, userId)
+                .orderByDesc(AnalysisJob::getCreatedAt)
+                .last("LIMIT " + capped));
+        return jobs.stream().map(this::toResponse).toList();
     }
 
     public AnalysisJobResponse getInternal(UUID jobId) {

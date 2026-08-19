@@ -29,7 +29,7 @@ async def chat_stream(
 
     为何不用 SSE 对内：Java WebClient 按行解析 NDJSON 更简单，且与对外 SSE 职责分离（P8）。
 
-    CHAT_BACKEND=orchestrator（默认）走 LangGraph；=mock 回退 Phase 2 Mock（排障用）。
+    CHAT_BACKEND=orchestrator（默认）走 ReAct；=mock 回退 Phase 2 Mock（排障用）。
     """
 
     history_count = len(req.history or [])

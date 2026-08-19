@@ -10,12 +10,13 @@ class StreamEvent(BaseModel):
 
     type:
       - token: LLM/Mock 增量文本
-      - citation: 检索引用（本阶段 Mock 可不发）
+      - citation: 检索引用
+      - tool: 工具开始/结束（ReAct 规划轮）
       - done: 正常结束，含 usage 等
       - error: 失败
     """
 
-    type: Literal["token", "citation", "done", "error"]
+    type: Literal["token", "citation", "tool", "done", "error"]
     text: str | None = None
     data: dict[str, Any] | None = None
     done: dict[str, Any] | None = None
@@ -36,3 +37,21 @@ def error_event(code: str, message: str) -> StreamEvent:
 
 def citation_event_from_list(citations: list[dict[str, Any]]) -> StreamEvent:
     return StreamEvent(type="citation", data={"citations": citations})
+
+
+def tool_event(
+    name: str,
+    status: str,
+    *,
+    arguments: dict[str, Any] | None = None,
+    success: bool | None = None,
+    error: str | None = None,
+) -> StreamEvent:
+    data: dict[str, Any] = {"name": name, "status": status}
+    if arguments is not None:
+        data["arguments"] = arguments
+    if success is not None:
+        data["success"] = success
+    if error is not None:
+        data["error"] = error
+    return StreamEvent(type="tool", data=data)

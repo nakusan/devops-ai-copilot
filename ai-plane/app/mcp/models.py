@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 class ToolCallSpec(BaseModel):
-    """关键词解析后的一次 tool 调用意图。"""
+    """一次工具调用意图（Agent / 测试构造用）。"""
 
     server: str
     tool: str
@@ -17,7 +17,7 @@ class ToolCallSpec(BaseModel):
 
 
 class ToolResult(BaseModel):
-    """规范化 MCP 调用结果，供 ToolNode / Synthesize 使用。"""
+    """规范化 MCP 调用结果，供 ToolExecutor / Agent messages 使用。"""
 
     success: bool
     server: str
@@ -33,7 +33,7 @@ class ToolResult(BaseModel):
         return json.dumps(self.data, ensure_ascii=False)
 
     def to_state_dict(self) -> dict[str, Any]:
-        """兼容既有 prompt_builder：优先 result，失败时带 error。"""
+        """兼容 Agent messages：优先 result，失败时带 error。"""
         out: dict[str, Any] = {
             "tool": self.tool,
             "server": self.server,

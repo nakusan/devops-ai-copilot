@@ -1,4 +1,4 @@
-"""在线检索入口 — 供 LangGraph RetrieveNode 调用。"""
+"""在线检索入口 — 供 Agent retrieve_knowledge 调用。"""
 
 import logging
 import time

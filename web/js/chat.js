@@ -162,6 +162,9 @@ function parseSseBlock(block, handlers) {
     case 'citation':
       handlers.onCitation?.(parsed);
       break;
+    case 'tool':
+      handlers.onTool?.(parsed);
+      break;
     case 'done':
       handlers.onDone(parsed);
       break;

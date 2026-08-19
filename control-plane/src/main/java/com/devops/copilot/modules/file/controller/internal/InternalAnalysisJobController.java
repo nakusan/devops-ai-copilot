@@ -12,10 +12,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
- * Python Analysis Worker / LangGraph 回调入口（Service Token 保护）。
+ * Python Analysis Worker / Agent 回调入口（Service Token 保护）。
  */
 @RestController
 @RequestMapping("/internal/v1/analysis-jobs")
@@ -33,20 +34,22 @@ public class InternalAnalysisJobController {
     }
 
     /**
-     * 查询用户最近一次已完成分析（AnalysisLookupNode）。
-     * 无结果返回 204。
+     * {@code latest=true}：最近一次 COMPLETED（兼容旧 AnalysisLookup）；无结果 204。
+     * {@code latest=false}：最近 {@code limit} 条任务列表（Agent list_analysis_jobs）。
      */
     @GetMapping
-    public ResponseEntity<AnalysisJobResponse> latest(
+    public ResponseEntity<?> query(
             @RequestParam Long userId,
             @RequestParam(defaultValue = "COMPLETED") String status,
-            @RequestParam(defaultValue = "true") boolean latest) {
-        // MVP：聊天场景只取最近 COMPLETED；status/latest 保留契约兼容
-        if (!latest || !"COMPLETED".equals(status)) {
-            // 非 latest 查询 V1 再扩展；当前仍回落最新 COMPLETED
+            @RequestParam(defaultValue = "true") boolean latest,
+            @RequestParam(defaultValue = "5") int limit) {
+        if (latest) {
+            // status 保留契约兼容；当前 latest 仍只取 COMPLETED
+            AnalysisJobResponse job = analysisJobService.getLatestCompleted(userId);
+            return job == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(job);
         }
-        AnalysisJobResponse job = analysisJobService.getLatestCompleted(userId);
-        return job == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(job);
+        List<AnalysisJobResponse> jobs = analysisJobService.listRecent(userId, limit);
+        return ResponseEntity.ok(jobs);
     }
 
     @PatchMapping("/{id}")

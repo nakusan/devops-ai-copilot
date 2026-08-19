@@ -15,6 +15,8 @@ import {
   renderMessages,
   appendUserMessage,
   appendAssistantMessage,
+  appendSystemMessage,
+  updateSystemMessage,
   showEmptyState,
   clearMessages,
   streamChat,
@@ -191,20 +193,52 @@ async function sendMessage() {
 
     const assistantEl = appendAssistantMessage('');
     let citationData = null;
+    let toolStatusEl = null;
 
     await streamChat(sessionId, content, {
       onToken(text) {
+        if (toolStatusEl) {
+          toolStatusEl.remove();
+          toolStatusEl = null;
+        }
         assistantEl.textContent += text;
         scrollToBottom();
       },
       onCitation(data) {
         citationData = data;
       },
+      onTool(data) {
+        const name = data?.name || 'tool';
+        const status = data?.status || '';
+        if (status === 'start') {
+          const label = `正在调用 ${name}…`;
+          if (toolStatusEl) {
+            updateSystemMessage(toolStatusEl, label);
+          } else {
+            toolStatusEl = appendSystemMessage(label);
+          }
+        } else if (status === 'done' && toolStatusEl) {
+          const ok = data?.success !== false;
+          updateSystemMessage(
+            toolStatusEl,
+            ok ? `已完成 ${name}` : `工具失败 ${name}${data?.error ? ': ' + data.error : ''}`,
+          );
+        }
+        scrollToBottom();
+      },
       onDone() {
+        if (toolStatusEl) {
+          toolStatusEl.remove();
+          toolStatusEl = null;
+        }
         finishAssistantMessage(assistantEl, citationData);
         scrollToBottom();
       },
       onError(err) {
+        if (toolStatusEl) {
+          toolStatusEl.remove();
+          toolStatusEl = null;
+        }
         showAssistantError(assistantEl, err);
         scrollToBottom();
       },

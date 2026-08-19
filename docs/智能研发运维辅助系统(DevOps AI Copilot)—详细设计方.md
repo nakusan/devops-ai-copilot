@@ -142,52 +142,37 @@
 | LLM 流式调用 | ❌ | ✅ | |
 | 业务表状态更新 | ✅ | 回调 API | ingest job 状态 |
 
-### 2.3 LangGraph 诊断图（硬编码 DAG）
+### 2.3 诊断编排（ReAct / LLM function calling）
 
 ```text
                     ┌─────────┐
                     │  START  │
                     └────┬────┘
                          ▼
-                 ┌───────────────┐
-                 │ RouterNode    │  ← 意图：rag / tool / rag_and_tool / analysis / direct
-                 └───────┬───────┘
-           ┌─────────────┼─────────────┬──────────────┐
-           ▼             ▼             ▼              ▼
-    ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
-    │RetrieveNode│ │ ToolNode   │ │ FanOutNode │ │ Analysis   │
-    │ (pgvector) │ │ (MCP)      │ │ retrieve ∥ │ │ LookupNode │
-    └─────┬──────┘ └─────┬──────┘ │ tool 并行  │ └─────┬──────┘
-          │              │        └─────┬──────┘       │
-          │              │              │              │
-          └──────────────┴──────┬───────┴──────────────┘
-                                ▼
-                        ┌───────────────┐
-                        │ SynthesizeNode│  ← 组装 context + 调 LLM
-                        └───────┬───────┘
-                                ▼
-                           ┌─────────┐
-                           │   END   │
-                           └─────────┘
+              ┌─────────────────────┐
+              │ Orchestrator ReAct  │
+              │ complete_with_tools │
+              └──────────┬──────────┘
+           tool_calls    │    无 tool_calls
+        ┌────────────────┼────────────────┐
+        ▼                                 ▼
+┌───────────────┐                 ┌───────────────┐
+│ ToolExecutor  │                 │ 最终流式回答  │
+│ retrieve/MCP/ │──回灌 messages──│ stream/切片   │
+│ analysis      │                 └───────┬───────┘
+└───────┬───────┘                         ▼
+        │                            ┌─────────┐
+        └──────── 再规划 ───────────►│   END   │
+                                     └─────────┘
 ```
 
-**Router 意图与路径**：
-
-| intent | 路径 | 典型问题 |
-|--------|------|----------|
-| `rag` | retrieve → synthesize | 「STATUS_899 是什么原因？」 |
-| `tool` | tool → synthesize | 「当前 DB 连接数多少？」 |
-| `rag_and_tool` | FanOutNode（retrieve ∥ tool 并行）→ synthesize | 「899 是什么？连接数正常吗？」 |
-| `analysis` | analysis → synthesize | 「我上传的 heap 分析结果呢？」 |
-| `direct` | synthesize | 闲聊、无需检索 |
-
-**V1 扩展**：`rag_then_tool`（先 RAG 再 Tool，有依赖的串行场景，如「按排查手册查相关指标」）。
+**工具由模型选择**（不再 Router 正则 / 关键词 resolver）。`done.intent` 由实际调用过的工具推导（`direct` / `rag` / `tool` / `rag_and_tool` / `analysis`）。详见 `docs/6.5`。
 
 **对话上下文（P7）**：
 
 - **唯一真相源**：PostgreSQL `messages` 表；每轮 Java 查最近 N 条作为 `history` 传入 Python。
 - **轮次产出**：assistant 的 `metadata_json` 存 citations、toolCalls、usage、intent（审计快照）。
-- **Redis checkpoint**：MVP **不启用**；V2 仅用于多步 Tool 中断恢复，且 **不存 messages**，每轮以 `history` 覆盖初始化 state。
+- **Checkpoint**：当前不启用；V2 仅用于多步 Tool 中断恢复，且 **不存 messages**。
 
 ---
 
