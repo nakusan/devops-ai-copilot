@@ -4,7 +4,7 @@ import logging
 import time
 
 from app.config import settings
-from app.observability.logging import chat_msg
+from app.observability.logging import chat_msg, preview
 from app.rag.client.embedding_client import embedding_client
 from app.rag.models.chunk_hit import ChunkHit
 from app.rag.retrieval.pgvector_store import pgvector_store
@@ -41,20 +41,21 @@ class RetrieverService:
         )
         filtered = [h for h in rows if h.score >= threshold]
 
-        # scores 覆盖被阈值淘汰的行：只记命中数时，"全被阈值挡掉" 与 "库里没内容"
-        # 在日志上完全同形，无法定位。
+        top_score = round(rows[0].score, 4) if rows else 0.0
         message = chat_msg(
             "12.检索",
-            f"teamId={team_id} topK={top_k} threshold={threshold:.2f} "
-            f"hits={len(filtered)}/{len(rows)} "
-            f"latencyMs={int((time.perf_counter() - started) * 1000)} "
-            f"scores={[round(h.score, 4) for h in rows]} "
-            f"titles={[h.document_title for h in filtered[:3]]}",
+            f"query=\"{preview(query)}\" hits={len(filtered)}/{len(rows)} "
+            f"threshold={threshold:.2f} topScore={top_score} "
+            f"latencyMs={int((time.perf_counter() - started) * 1000)}",
         )
         if rows and not filtered:
-            # 捞到了内容但一条都没过阈值：阈值大概率高于当前 Embedding 模型的分数区间
-            logger.warning("%s reason=all_below_threshold", message)
-        else:
+            # 捞到了内容但一条都没过阈值：附带原始分数便于调 threshold
+            logger.warning(
+                "%s reason=all_below_threshold scores=%s",
+                message,
+                [round(h.score, 4) for h in rows],
+            )
+        elif filtered:
             logger.info(message)
         return filtered
 

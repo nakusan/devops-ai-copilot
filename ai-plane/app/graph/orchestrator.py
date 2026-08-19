@@ -21,7 +21,7 @@ from app.graph.llm.prompt_builder import build_agent_messages
 from app.graph.models.internal_chat_request import InternalChatRequest
 from app.graph.models.stream_event import StreamEvent, done_event, error_event, tool_event
 from app.graph.streaming.event_emitter import build_done_payload, citation_event
-from app.graph.tools.executor import execute_tool_calls
+from app.graph.tools.executor import ToolExecution, execute_tool_calls
 from app.graph.tools.registry import build_openai_tools, derive_intent
 from app.observability.logging import chat_msg, preview
 from app.observability.metrics import CHAT_STREAM_DURATION, observe_with_exemplar
@@ -66,6 +66,7 @@ async def run_diagnosis_stream(
     citations: list[dict[str, Any]] = []
     tool_call_records: list[dict[str, Any]] = []
     used_tools: set[str] = set()
+    plan_rounds = 0
     usage_total: dict[str, Any] = {
         "promptTokens": 0,
         "completionTokens": 0,
@@ -77,7 +78,16 @@ async def run_diagnosis_stream(
         if req.trace_id:
             span.set_attribute("copilot.trace_id", req.trace_id)
         span.set_attribute("agent.tools", len(tools))
+        trace_extra = {"trace_id": req.trace_id or ""}
         try:
+            logger.info(
+                chat_msg(
+                    "11.编排",
+                    f"sessionId={req.session_id} tools={len(tools)} "
+                    f"maxRounds={max_rounds} model={cfg.model}",
+                ),
+                extra=trace_extra,
+            )
             # 无可用工具：直接最终流式
             if not tools:
                 async for evt in _final_stream(
@@ -86,6 +96,7 @@ async def run_diagnosis_stream(
                     cancel_event=cancel_event,
                     prefetched_content=None,
                     prefetched_usage=None,
+                    trace_id=req.trace_id,
                 ):
                     if evt.type == "error":
                         yield evt
@@ -117,6 +128,7 @@ async def run_diagnosis_stream(
                     tools=offer_tools,
                     timeout_seconds=cfg.llm_timeout_seconds,
                 )
+                plan_rounds += 1
                 usage_total = merge_usage(usage_total, turn.usage)
 
                 if turn.cancelled or cancel_event.is_set():
@@ -127,14 +139,23 @@ async def run_diagnosis_stream(
                     return
 
                 if turn.tool_calls:
+                    tool_names = ",".join(tc["name"] for tc in turn.tool_calls)
+                    logger.info(
+                        chat_msg(
+                            "11.规划",
+                            f"round={round_idx + 1} decision=tools tools={tool_names}",
+                        ),
+                        extra=trace_extra,
+                    )
                     if round_idx >= max_rounds - 1:
                         # 工具轮次耗尽：丢掉本轮 tool_calls，强制最终生成
                         logger.warning(
                             chat_msg(
-                                "13.工具轮次耗尽",
-                                f"sessionId={req.session_id} rounds={max_rounds}",
+                                "11.规划",
+                                f"round={round_idx + 1} decision=force_answer "
+                                f"reason=max_rounds_exceeded maxRounds={max_rounds}",
                             ),
-                            extra={"trace_id": req.trace_id or ""},
+                            extra=trace_extra,
                         )
                         async for evt in _final_stream(
                             messages,
@@ -142,6 +163,7 @@ async def run_diagnosis_stream(
                             cancel_event=cancel_event,
                             prefetched_content=None,
                             prefetched_usage=None,
+                            trace_id=req.trace_id,
                         ):
                             if evt.type == "error":
                                 yield evt
@@ -184,16 +206,13 @@ async def run_diagnosis_stream(
                         user_context=user_context,
                         trace_id=req.trace_id,
                     )
-                    summary = [
-                        f"{ex.name}={'ok' if ex.success else 'err'}" for ex in executions
-                    ]
                     logger.info(
                         chat_msg(
-                            "12.工具",
-                            f"sessionId={req.session_id} round={round_idx + 1} "
-                            f"calls={len(executions)} summary={summary}",
+                            "12.执行",
+                            f"round={round_idx + 1} "
+                            f"results={_format_tool_results(executions)}",
                         ),
-                        extra={"trace_id": req.trace_id or "", "event": "agent.tools.done"},
+                        extra=trace_extra,
                     )
 
                     new_citations: list[dict[str, Any]] = []
@@ -229,12 +248,21 @@ async def run_diagnosis_stream(
                     continue
 
                 # 无 tool_calls：最终回答（优先切片已有 content，避免再打模型）
+                answer_chars = len(turn.content or "")
+                logger.info(
+                    chat_msg(
+                        "11.规划",
+                        f"round={round_idx + 1} decision=answer contentChars={answer_chars}",
+                    ),
+                    extra=trace_extra,
+                )
                 async for evt in _final_stream(
                     messages,
                     req=req,
                     cancel_event=cancel_event,
                     prefetched_content=turn.content,
                     prefetched_usage=turn.usage,
+                    trace_id=req.trace_id,
                 ):
                     if evt.type == "error":
                         yield evt
@@ -250,6 +278,7 @@ async def run_diagnosis_stream(
 
             intent = derive_intent(used_tools)
             span.set_attribute("intent", intent)
+            span.set_attribute("agent.plan_rounds", plan_rounds)
             yield _done(
                 req,
                 started,
@@ -280,9 +309,15 @@ async def _final_stream(
     cancel_event: asyncio.Event,
     prefetched_content: str | None,
     prefetched_usage: dict[str, Any] | None,
+    trace_id: str | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """最终回答：有预取 content 则本地切片；否则无 tools 流式生成。"""
     cfg = req.agent_config
+    mode = "prefetch" if prefetched_content and prefetched_content.strip() else "stream"
+    logger.info(
+        chat_msg("13.生成", f"mode={mode} answerChars={len(prefetched_content or '')}"),
+        extra={"trace_id": trace_id or ""},
+    )
     if prefetched_content and prefetched_content.strip():
         async for evt in stream_text_chunks(
             prefetched_content,
@@ -324,6 +359,26 @@ def _done(
             tool_calls=tool_calls,
         )
     )
+
+
+def _format_tool_results(executions: list[ToolExecution]) -> str:
+    """紧凑汇总：retrieve 带 hits，其余 ok/err。"""
+    parts: list[str] = []
+    for ex in executions:
+        if ex.name == "retrieve_knowledge" and ex.success:
+            hits = (ex.tool_call_record.get("result") or {}).get("hits", 0)
+            parts.append(f"{ex.name}:{hits}hits")
+        elif ex.name in {"list_analysis_jobs", "get_analysis_job"} and ex.success:
+            result = ex.tool_call_record.get("result") or {}
+            if ex.name == "list_analysis_jobs":
+                parts.append(f"{ex.name}:{result.get('count', 0)}")
+            else:
+                parts.append(f"{ex.name}:{result.get('jobId', '-')}")
+        elif ex.success:
+            parts.append(f"{ex.name}:ok")
+        else:
+            parts.append(f"{ex.name}:err")
+    return ",".join(parts) if parts else "-"
 
 
 def _args_json(arguments: Any) -> str:

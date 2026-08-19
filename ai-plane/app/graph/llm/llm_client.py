@@ -3,6 +3,12 @@
 模式 A：
 - 规划轮：非流式 complete（可带 tools）→ 解析 tool_calls 或 content
 - 最终轮：流式 stream_chat 推 token；若规划轮已有 content 则本地切片推送（不重复打模型）
+
+横切关注点（span / TTFB / usage）委托给：
+- ``app.observability.llm_observer.LlmObserver``
+- ``app.graph.llm.instrumentation``（纯函数）
+
+本文件只保留：构造请求、解析 choice/chunk、cancel、yield 业务事件。
 """
 
 from __future__ import annotations
@@ -10,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,13 +23,29 @@ from typing import Any
 from openai import AsyncOpenAI, RateLimitError
 
 from app.config import settings
+from app.graph.llm.instrumentation import (
+    attach_usage,
+    estimate_token_usage,
+    merge_usage,
+    parse_openai_usage,
+    pop_stream_usage,
+    prompt_chars,
+)
 from app.graph.models.stream_event import StreamEvent, error_event, token_event
-from app.observability.logging import chat_msg
-from app.observability.metrics import LLM_TTFB, observe_with_exemplar
-from app.observability.otel import get_tracer
+from app.observability.llm_observer import LlmObserver
+from app.observability.logging import chat_msg, preview
 
 logger = logging.getLogger(__name__)
-_tracer = get_tracer("ai-plane.llm")
+
+# 对外再导出，保持 orchestrator 等调用方 import 路径不变
+__all__ = [
+    "LlmTurnResult",
+    "complete_with_tools",
+    "merge_usage",
+    "pop_stream_usage",
+    "stream_chat",
+    "stream_text_chunks",
+]
 
 
 @dataclass
@@ -53,12 +74,11 @@ async def complete_with_tools(
 
     mode = settings.effective_llm_mode()
     timeout = timeout_seconds or settings.llm_timeout_seconds
-    prompt_chars = sum(len(str(m.get("content") or "")) for m in messages)
-    logger.info(
+    logger.debug(
         chat_msg(
             "13.LLM",
             f"mode={mode} phase=plan model={model} temp={temperature} "
-            f"msgCount={len(messages)} promptChars={prompt_chars} "
+            f"msgCount={len(messages)} promptChars={prompt_chars(messages)} "
             f"tools={len(tools or [])} timeoutSec={timeout}",
         )
     )
@@ -82,10 +102,8 @@ async def complete_with_tools(
         if cancel_event.is_set():
             return LlmTurnResult(cancelled=True)
         try:
-            with _tracer.start_as_current_span("llm.plan") as span:
-                span.set_attribute("gen_ai.system", "openai_compatible")
-                span.set_attribute("gen_ai.request.model", model)
-                span.set_attribute("gen_ai.request.temperature", float(temperature))
+            # 埋点切片：span / usage attrs；业务只负责 create + 解析 message
+            with LlmObserver.plan(model, temperature).activate() as obs:
                 kwargs: dict[str, Any] = {
                     "model": model,
                     "messages": messages,
@@ -97,36 +115,12 @@ async def complete_with_tools(
                     kwargs["tool_choice"] = "auto"
                 resp = await client.chat.completions.create(**kwargs)
                 choice = resp.choices[0].message if resp.choices else None
-                usage = {}
-                if resp.usage is not None:
-                    usage = {
-                        "promptTokens": resp.usage.prompt_tokens or 0,
-                        "completionTokens": resp.usage.completion_tokens or 0,
-                        "totalTokens": resp.usage.total_tokens or 0,
-                    }
-                    _set_usage_attrs(span, usage)
+                usage = parse_openai_usage(resp.usage)
+                obs.record_usage(usage)
 
-                tool_calls: list[dict[str, Any]] = []
-                if choice and choice.tool_calls:
-                    for tc in choice.tool_calls:
-                        fn = tc.function
-                        args_raw = fn.arguments or "{}"
-                        try:
-                            if isinstance(args_raw, str):
-                                args = json.loads(args_raw)
-                            else:
-                                args = dict(args_raw)
-                        except json.JSONDecodeError:
-                            args = {"_raw": args_raw}
-                        tool_calls.append(
-                            {
-                                "id": tc.id or fn.name,
-                                "name": fn.name,
-                                "arguments": args,
-                            }
-                        )
+                tool_calls = _parse_tool_calls(choice)
                 content = (choice.content if choice else None) or None
-                span.set_attribute("llm.tool_calls", len(tool_calls))
+                obs.set_tool_call_count(len(tool_calls))
                 return LlmTurnResult(content=content, tool_calls=tool_calls, usage=usage)
         except RateLimitError:
             if attempts >= 2:
@@ -137,7 +131,9 @@ async def complete_with_tools(
         except TimeoutError:
             return LlmTurnResult(error_event=error_event("LLM_TIMEOUT", "LLM 请求超时"))
         except Exception as ex:  # noqa: BLE001
-            logger.exception("LLM plan failed")
+            logger.exception(
+                chat_msg("13.LLM", f"phase=plan status=error error=\"{preview(str(ex))}\"")
+            )
             return LlmTurnResult(error_event=error_event("AGENT_ERROR", str(ex)))
 
     return LlmTurnResult(error_event=error_event("LLM_RATE_LIMIT", "LLM 限流，请稍后重试"))
@@ -155,12 +151,12 @@ async def stream_chat(
     """流式生成 token 事件（最终回答轮，不带 tools）。"""
     mode = settings.effective_llm_mode()
     timeout = timeout_seconds or settings.llm_timeout_seconds
-    prompt_chars = sum(len(str(m.get("content") or "")) for m in messages)
-    logger.info(
+    logger.debug(
         chat_msg(
             "13.LLM",
             f"mode={mode} phase=stream model={model} temp={temperature} "
-            f"msgCount={len(messages)} promptChars={prompt_chars} timeoutSec={timeout}",
+            f"msgCount={len(messages)} promptChars={prompt_chars(messages)} "
+            f"timeoutSec={timeout}",
         )
     )
 
@@ -181,31 +177,29 @@ async def stream_text_chunks(
     cancel_event: asyncio.Event,
     usage: dict[str, Any] | None = None,
 ) -> AsyncIterator[StreamEvent]:
-    """把已拿到的完整答案切片推送，避免规划轮无 tool_calls 时再打一次模型。"""
+    """把已拿到的完整答案切片推送，避免规划轮无 tool_calls 时再打一次模型。
+
+    无 OTel span（与原先一致）；仅采 TTFB + attach usage。
+    """
     chunk_size = max(1, settings.llm_mock_chunk_size)
     delay = settings.llm_mock_delay_ms / 1000.0
-    ttfb_started = time.perf_counter()
-    first = True
+    # 无 span：只用 observer 的时钟与 TTFB histogram
+    obs = LlmObserver.stream(model="prefetch", temperature=0.0)
+    obs.begin_clock()
     for i in range(0, len(text), chunk_size):
         if cancel_event.is_set():
             yield error_event("CANCELLED", "生成已取消")
             return
-        if first:
-            observe_with_exemplar(LLM_TTFB, time.perf_counter() - ttfb_started)
-            first = False
+        obs.mark_first_token()
         yield token_event(text[i : i + chunk_size])
         if delay > 0:
             await asyncio.sleep(delay)
     if usage:
-        _attach_usage(usage)
+        attach_usage(usage)
     elif text:
-        _attach_usage(
-            {
-                "promptTokens": 0,
-                "completionTokens": max(1, len(text) // 4),
-                "totalTokens": max(1, len(text) // 4),
-            }
-        )
+        # 与原先一致：切片路径无真实 prompt，usage 只估 completion
+        n = max(1, len(text) // 4)
+        attach_usage({"promptTokens": 0, "completionTokens": n, "totalTokens": n})
 
 
 def _mock_complete(
@@ -215,11 +209,12 @@ def _mock_complete(
     """默认 mock：不调工具，返回简短 content（测试可 patch 本函数或 complete_with_tools）。"""
     _ = tools
     body = _last_user_content(messages) or "ok"
+    # usage 公式与改造前保持一致，避免测试/配额侧漂移
     return LlmTurnResult(
         content=f"[mock-plan] {body}",
         tool_calls=[],
         usage={
-            "promptTokens": max(1, sum(len(str(m.get("content") or "")) for m in messages) // 4),
+            "promptTokens": max(1, prompt_chars(messages) // 4),
             "completionTokens": max(1, len(body) // 4),
             "totalTokens": max(1, (len(body) + 8) // 4),
         },
@@ -240,24 +235,15 @@ async def _mock_stream(
     body = user_message or _last_user_content(messages)
     full = prefix + body
     produced = 0
-    ttfb_started = time.perf_counter()
-    first_token = True
 
-    with _tracer.start_as_current_span("llm.completion") as span:
-        span.set_attribute("gen_ai.system", "mock")
-        span.set_attribute("gen_ai.request.model", model)
-        span.set_attribute("gen_ai.request.temperature", float(temperature))
+    with LlmObserver.stream(model, temperature, system="mock").activate() as obs:
         for i in range(0, len(full), chunk_size):
             if cancel_event.is_set():
                 yield error_event("CANCELLED", "生成已取消")
                 return
             piece = full[i : i + chunk_size]
             produced += len(piece)
-            if first_token:
-                ttfb = time.perf_counter() - ttfb_started
-                span.set_attribute("llm.ttfb_ms", int(ttfb * 1000))
-                observe_with_exemplar(LLM_TTFB, ttfb)
-                first_token = False
+            obs.mark_first_token()
             yield token_event(piece)
             if delay > 0:
                 await asyncio.sleep(delay)
@@ -266,15 +252,11 @@ async def _mock_stream(
             yield error_event("CANCELLED", "生成已取消")
             return
 
-        prompt_tokens = max(1, sum(len(str(m.get("content") or "")) for m in messages) // 4)
-        completion_tokens = max(1, produced // 4)
-        usage = {
-            "promptTokens": prompt_tokens,
-            "completionTokens": completion_tokens,
-            "totalTokens": prompt_tokens + completion_tokens,
-        }
-        _set_usage_attrs(span, usage)
-        _attach_usage(usage)
+        usage = estimate_token_usage(
+            prompt_chars_n=prompt_chars(messages),
+            produced_chars=produced,
+        )
+        obs.finish_with_usage(usage)
 
 
 async def _openai_stream(
@@ -300,12 +282,7 @@ async def _openai_stream(
         while attempts < 2:
             attempts += 1
             try:
-                ttfb_started = time.perf_counter()
-                first_token = True
-                with _tracer.start_as_current_span("llm.completion") as span:
-                    span.set_attribute("gen_ai.system", "openai_compatible")
-                    span.set_attribute("gen_ai.request.model", model)
-                    span.set_attribute("gen_ai.request.temperature", float(temperature))
+                with LlmObserver.stream(model, temperature).activate() as obs:
                     stream = await client.chat.completions.create(
                         model=model,
                         messages=messages,  # type: ignore[arg-type]
@@ -319,22 +296,16 @@ async def _openai_stream(
                         if cancel_event.is_set():
                             yield error_event("CANCELLED", "生成已取消")
                             return
+                        # usage 可能出现在末尾 chunk
                         if chunk.usage is not None:
-                            usage = {
-                                "promptTokens": chunk.usage.prompt_tokens or 0,
-                                "completionTokens": chunk.usage.completion_tokens or 0,
-                                "totalTokens": chunk.usage.total_tokens or 0,
-                            }
-                        delta = chunk.choices[0].delta.content if chunk.choices else None
+                            usage = parse_openai_usage(chunk.usage)
+                        delta = (
+                            chunk.choices[0].delta.content if chunk.choices else None
+                        )
                         if delta:
-                            if first_token:
-                                ttfb = time.perf_counter() - ttfb_started
-                                span.set_attribute("llm.ttfb_ms", int(ttfb * 1000))
-                                observe_with_exemplar(LLM_TTFB, ttfb)
-                                first_token = False
+                            obs.mark_first_token()
                             yield token_event(delta)
-                    _set_usage_attrs(span, usage)
-                    _attach_usage(usage)
+                    obs.finish_with_usage(usage)
                     return
             except RateLimitError:
                 if attempts >= 2:
@@ -345,7 +316,12 @@ async def _openai_stream(
                 yield error_event("LLM_TIMEOUT", "LLM 请求超时")
                 return
             except Exception as ex:  # noqa: BLE001
-                logger.exception("LLM stream failed")
+                logger.exception(
+                    chat_msg(
+                        "13.LLM",
+                        f"phase=stream status=error error=\"{preview(str(ex))}\"",
+                    )
+                )
                 yield error_event("AGENT_ERROR", str(ex))
                 return
 
@@ -356,13 +332,30 @@ async def _openai_stream(
         yield error_event("LLM_TIMEOUT", "LLM 请求超时")
 
 
-def _set_usage_attrs(span: Any, usage: dict[str, Any]) -> None:
-    if not usage:
-        return
-    if "promptTokens" in usage:
-        span.set_attribute("gen_ai.usage.input_tokens", int(usage["promptTokens"]))
-    if "completionTokens" in usage:
-        span.set_attribute("gen_ai.usage.output_tokens", int(usage["completionTokens"]))
+def _parse_tool_calls(choice: Any) -> list[dict[str, Any]]:
+    """从 assistant message 解析 OpenAI tool_calls → 内部 dict 列表。"""
+    tool_calls: list[dict[str, Any]] = []
+    if not choice or not choice.tool_calls:
+        return tool_calls
+    for tc in choice.tool_calls:
+        fn = tc.function
+        args_raw = fn.arguments or "{}"
+        try:
+            # 分行写避免 E501；SIM108 三元式在此可读性更差
+            if isinstance(args_raw, str):  # noqa: SIM108
+                args = json.loads(args_raw)
+            else:
+                args = dict(args_raw)
+        except json.JSONDecodeError:
+            args = {"_raw": args_raw}
+        tool_calls.append(
+            {
+                "id": tc.id or fn.name,
+                "name": fn.name,
+                "arguments": args,
+            }
+        )
+    return tool_calls
 
 
 def _last_user_content(messages: list[dict[str, Any]]) -> str:
@@ -370,28 +363,3 @@ def _last_user_content(messages: list[dict[str, Any]]) -> str:
         if msg.get("role") == "user":
             return str(msg.get("content") or "")
     return ""
-
-
-_last_usage: dict[str, Any] = {}
-
-
-def _attach_usage(usage: dict[str, Any]) -> None:
-    global _last_usage
-    _last_usage = usage
-
-
-def pop_stream_usage() -> dict[str, Any]:
-    """读取并清空最近一次 stream / plan 的 usage。"""
-    global _last_usage
-    usage = _last_usage
-    _last_usage = {}
-    return usage
-
-
-def merge_usage(total: dict[str, Any], part: dict[str, Any]) -> dict[str, Any]:
-    """累加多轮 LLM usage。"""
-    if not part:
-        return total
-    for key in ("promptTokens", "completionTokens", "totalTokens"):
-        total[key] = int(total.get(key) or 0) + int(part.get(key) or 0)
-    return total

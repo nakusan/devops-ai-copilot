@@ -2,16 +2,20 @@
 
 约定：`[CHAT] step=序号.中文步骤名 key=value ...`，文本字段用 preview 截断。
 
-聊天链路每轮对话固定若干条 INFO，一个步骤号只允许一处打印：
+ReAct 聊天链路每轮对话固定若干条 INFO，一个步骤号只在一处打印：
 
-    10.接收请求  api/chat.py          入口参数 + 用户原文（全链路唯一一次打原文）
-    12.检索      rag/retrieval        命中数 + 原始分数（未命中时升为 WARN）
-    12.工具      graph/orchestrator   本轮 tool 名汇总（ReAct）
-    13.LLM       graph/llm            模型 / 上下文体积（plan 或 stream）
-    14.完成      api/chat.py          终态汇总：耗时、TTFB、token、usage
+    10.接收请求  api/chat.py           入口 + 用户原文（全链路唯一一次）
+    11.编排      orchestrator         可用工具数、最大规划轮次（一次）
+    11.规划      orchestrator         每轮 LLM 决策：调工具 or 直接回答
+    12.检索      rag/retrieval        仅 retrieve_knowledge；未命中阈值升 WARN
+    12.执行      orchestrator         每轮工具执行汇总（一行，不重复 12.检索 细节）
+    13.生成      orchestrator         最终答案：prefetch 切片 or stream 流式（一次）
+    14.完成      api/chat.py          终态汇总（intent / usage / citations / toolCalls）
+    14.错误      api/chat.py          流内 error 事件
+    14.异常      orchestrator         未捕获异常
+    15.取消      api/chat.py          客户端断开
 
-新增日志前先确认字段没在上述步骤里出现过：字段重复比日志条数多更难排障，
-一次对话刷十几行同质日志会把真正的异常淹掉。
+LLM 调用细节（model / promptChars）不进 INFO，避免多轮 ReAct 刷屏；失败见 exception 或 14.*。
 """
 
 from __future__ import annotations
